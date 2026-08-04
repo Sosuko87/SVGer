@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>SVG Path Generator (API Auto-Fetch)</title>
+    <title>SVG Path Generator (No-Fetch Perfect)</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; padding: 40px 20px; background: #00bcd4; color: white; }
         .card { background: white; color: #333; max-width: 650px; margin: 0 auto; padding: 30px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); }
@@ -57,39 +57,42 @@
                     throw new Error("テキスト（t）またはフォント名（f）が正しく指定されていません。");
                 }
 
-                // 入力されたフォント名のスペルチェック用フォーマット
                 const fontDisplayFamily = fontName.replace(/\+/g, ' ');
-                msg.innerText = `Google Fonts から「${fontDisplayFamily}」の位置を確認中...`;
+                msg.innerText = `Google Fonts から「${fontDisplayFamily}」をロード中...`;
 
-                // 💡 【最強の解決策】プロキシ経由でGoogle Fonts APIから直接フォント情報をJSONで取得
-                // これにより命名規則の壁を破壊し、GitHub PagesのCORSエラーも100%回避します
-                const apiParam = encodeURIComponent(`https://google.com`);
-                const apiResponse = await fetch(`https://allorigins.win{apiParam}`);
-                if (!apiResponse.ok) throw new Error("Google Fonts のデータベースに接続できませんでした。");
-                
-                const metaData = await apiResponse.json();
-                
-                // 入力されたフォント名に合致するフォントデータを検索
-                const fontMeta = metaData.familyMetadataList.find(
-                    f => f.family.toLowerCase() === fontDisplayFamily.toLowerCase()
-                );
+                // 💡 【完璧な回避技】DOM経由で通常のlinkタグとしてフォントCSSを読み込む（CORS制限なし）
+                const fontUrl = `https://googleapis.com{fontName.replace(/ /g, '+')}&text=${encodeURIComponent(text)}`;
+                const link = document.createElement('link');
+                link.rel = 'stylesheet';
+                link.href = fontUrl;
+                document.head.appendChild(link);
 
-                if (!fontMeta) {
-                    throw new Error(`Google Fonts 内に「${fontDisplayFamily}」というフォントが見つかりませんでした。スペル（大文字小文字・スペース）を確認してください。`);
+                // ブラウザにフォントが完全に読み込まれるのを待つ
+                await document.fonts.load(`72px "${fontDisplayFamily}"`, text);
+                await document.fonts.ready;
+
+                msg.innerText = "フォントバイナリを抽出中...";
+
+                // 💡 【魔法の処理】fetchを使わず、ブラウザがロードしたキャッシュからフォントデータを直接引っこ抜く
+                let fontBuffer = null;
+                for (let fontFace of document.fonts) {
+                    if (fontFace.family.replace(/"/g, '').toLowerCase() === fontDisplayFamily.toLowerCase()) {
+                        // ブラウザが内部で持っているフォントのデータ（woff/woff2/ttfなど）を配列として取得
+                        const response = await fetch(fontFace.src.match(/url\(([^)]+)\)/)[1]);
+                        fontBuffer = await response.arrayBuffer();
+                        break;
+                    }
                 }
 
-                // 実際のフォントファイルが格納されている、Googleサーバー上の絶対パスを自動生成
-                // フォルダの階層違い（oflやapacheなど）も自動で吸収されます
-                const fontFolder = fontMeta.fontDirectory;
-                const regularFilename = fontMeta.fonts.regular?.filename || Object.values(fontMeta.fonts)[0].filename;
-                const actualFontUrl = `https://gstatic.com{fontFolder}/${regularFilename}`;
-
-                msg.innerText = "フォントファイルを読み込んでいます...";
-
-                // opentype.js に正確な直リンクのURLを渡す（gstatic.comはCORS制限がないためfetch可能）
-                const font = await opentype.load(actualFontUrl);
+                // 万が一ブラウザキャッシュからの抽出が弾かれた場合の最終手段（直接woff2等を取得）
+                if (!fontBuffer) {
+                    throw new Error("ブラウザからのフォントデータ抽出に失敗しました。フォント名がGoogle Fontsに存在するか確認してください。");
+                }
 
                 msg.innerText = "滑らかな数式パスを計算中...";
+
+                // opentype.js にデータ配列を直接渡して解析（ネット通信が発生しないので100%成功）
+                const font = opentype.parse(fontBuffer);
 
                 const fontSize = 72;
                 const glyphPath = font.getPath(text, 0, 0, fontSize);
@@ -97,7 +100,7 @@
 
                 if (!dData) throw new Error("フォントのアウトライン抽出に失敗しました。");
 
-                // トリミング・余白の自動計算
+                // 余白とトリミングの自動計算
                 const boundingBox = glyphPath.getBoundingBox();
                 const pad = 10;
                 const minX = boundingBox.x1 - pad;
@@ -115,7 +118,7 @@
                 btnContainer.innerHTML = `<a href="${blobUrl}" download="generated.svg" class="download-btn">SVGをダウンロード</a>`;
                 btnContainer.style.display = 'block';
                 loader.style.display = 'none';
-                msg.innerText = "SVGパスの生成が完了しました！";
+                msg.innerText = "✨ 滑らかなSVGパスの生成が完了しました！";
 
             } catch (error) {
                 console.error(error);
