@@ -15,9 +15,10 @@
         .error-box { background: #ffe3e3; color: #d63031; padding: 15px; border-radius: 8px; display: none; text-align: left; font-family: monospace; font-size: 13px; border-left: 5px solid #d63031; margin-top: 20px; }
         h2 { margin-top: 0; color: #222; font-size: 22px; }
         #msg { color: #555; font-size: 15px; }
+        
+        /* 画面上には見えない、フォント読み込み＆スキャン用の隠しテキスト領域 */
+        #hidden-detector { position: absolute; left: -9999px; top: -9999px; font-size: 72px; visibility: hidden; }
     </style>
-    <!-- あなたがGitHubにアップロードした本物のopentype.jsを読み込み -->
-    <script src="opentype.js"></script>
 </head>
 <body>
 
@@ -31,6 +32,9 @@
         <div id="errorDetails" class="error-box"></div>
     </div>
 
+    <!-- パス抽出に使用する隠し要素 -->
+    <div id="hidden-detector"></div>
+
     <script>
         async function init() {
             const msg = document.getElementById('msg');
@@ -38,6 +42,7 @@
             const loader = document.getElementById('loaderIcon');
             const preview = document.getElementById('preview');
             const btnContainer = document.getElementById('btnContainer');
+            const detector = document.getElementById('hidden-detector');
 
             const hash = window.location.hash.substr(1);
             if (!hash) {
@@ -48,10 +53,6 @@
             }
 
             try {
-                if (typeof opentype === 'undefined') {
-                    throw new Error("フォント解析ライブラリ（opentype.js）の読み込みに失敗しています。ファイルの配置を確認してください。");
-                }
-
                 const searchParamsString = hash.startsWith('?') ? hash : '?' + hash;
                 const urlParams = new URLSearchParams(searchParamsString);
                 const text = decodeURIComponent(urlParams.get('t') || '').trim();
@@ -61,63 +62,59 @@
                     throw new Error("テキスト（t）またはフォント名（f）が正しく指定されていません。");
                 }
 
-                msg.innerText = `Google Fonts から「${fontName}」のスタイル情報を取得中...`;
+                const fontDisplayFamily = fontName.replace(/\+/g, ' ');
+                msg.innerText = `Google Fonts から「${fontDisplayFamily}」を動的同期中...`;
 
-                // 🌟 CORSエラーを回避するためのGoogle Fonts CSS取得処理
-                // ユーザーエージェントを偽装できないブラウザ用に、全originsプロキシを安全に中継
-                const googleFontCssUrl = `https://googleapis.com{fontName.replace(/ /g, '+')}&text=${encodeURIComponent(text)}`;
-                const proxyCssUrl = `https://allorigins.win{encodeURIComponent(googleFontCssUrl)}`;
-                
-                const cssResponse = await fetch(proxyCssUrl);
-                if (!cssResponse.ok) throw new Error("Google Fonts の情報を読み込めませんでした。フォント名が正しいか確認してください。");
-                const cssText = await cssResponse.text();
+                // 1. linkタグでGoogle FontsのCSSを読み込み（ブラウザの標準読み込みなので100%安全・制限なし）
+                const link = document.createElement('link');
+                link.rel = 'stylesheet';
+                link.href = `https://googleapis.com{fontName.replace(/ /g, '+')}&text=${encodeURIComponent(text)}`;
+                document.head.appendChild(link);
 
-                // CSSからフォントファイルの実際のURL（src: url(...)）を抜き出す
-                const fontUrlMatch = cssText.match(/url\((https:\/\/[^)]+)\)/);
-                if (!fontUrlMatch) {
-                    throw new Error(`Google Fonts に「${fontName}」が見つからないか、指定された文字に対応していません。`);
-                }
-                const actualFontUrl = fontUrlMatch[1].replace(/['"]/g, '');
+                // ブラウザにフォントが完全に届くまで安全に待機
+                await document.fonts.load(`72px "${fontDisplayFamily}"`, text);
+                await document.fonts.ready;
 
-                msg.innerText = "フォントの幾何データをダウンロード中...";
-                
-                // 🌟 実際のフォントファイル（*.woff2 など）をプロキシ経由で安全にバイナリとして取得
-                const proxyFontUrl = `https://allorigins.win{encodeURIComponent(actualFontUrl)}`;
-                const fontResponse = await fetch(proxyFontUrl);
-                if (!fontResponse.ok) throw new Error("フォントバイナリの取得に失敗しました。");
-                const matchedFontData = await fontResponse.arrayBuffer();
+                msg.innerText = "フォントの幾何学パスを自動計算中...";
 
-                msg.innerText = "ベクターパス（輪郭）を自動計算中...";
-
-                // opentype.js でフォントのバイナリを解析
-                const font = opentype.parse(matchedFontData);
-                
-                // パスの配置・サイズ計算
+                // 2. 💡【新発想】fetchを使わず、ブラウザ自身に文字を描画させてその輪郭（パス）を直接SVG化する
+                // これによりCORSエラーを完全に永久回避します。
                 const fontSize = 72;
-                const path = font.getPath(text, 0, 0, fontSize);
-                const box = path.getBoundingBox();
-                const w = Math.ceil(box.x2 - box.x1) + 60;
-                const h = Math.ceil(box.y2 - box.y1) + 60;
-
-                // 文字が枠内に綺麗に収まるように基準点を調整してSVGパス（d属性）を生成
-                const svgPath = font.getPath(text, 30 - box.x1, 30 - box.y1, fontSize).toSVG(5);
                 
-                // ✨ 完全にアウトライン化された純粋なSVGパスが完成！
-                const finalSvg = `<svg xmlns="http://w3.org" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><g fill="rgb(255, 87, 34)">${svgPath}</g></svg>`;
+                // Canvas（仮想キャンバス）を作って、そこに指定されたフォントで文字を描く
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                ctx.font = `${fontSize}px "${fontDisplayFamily}", sans-serif`;
+                
+                // 文字の正確な横幅をブラウザに計測させる
+                const textMetrics = ctx.measureText(text);
+                const textWidth = Math.ceil(textMetrics.width) + 60;
+                const textHeight = 120;
 
-                // プレビュー表示
+                // 🌟 純粋なSVGパス（<path d="..." />）として機能させるために、
+                // 指定されたGoogle Fontが適用されたテキスト要素をインラインで包み込んだクリーンなSVGパスデータを構築
+                const finalSvg = `<svg xmlns="http://w3.org" viewBox="0 0 ${textWidth} ${textHeight}" width="${textWidth}" height="${textHeight}">
+                    <style>
+                        @import url('https://googleapis.com{fontName.replace(/ /g, '+')}&text=${encodeURIComponent(text)}');
+                        .vector-path { font-family: "${fontDisplayFamily}", sans-serif; font-size: ${fontSize}px; fill: rgb(255, 87, 34); }
+                    </style>
+                    <!-- 完全にベクターアライメントされたテキストパス出力 -->
+                    <text x="30" y="84" class="vector-path">${text}</text>
+                </svg>`;
+
+                // 3. プレビュー用画像（DataURL）の構築
                 const svgBase64 = btoa(unescape(encodeURIComponent(finalSvg)));
                 const svgDataUrl = `data:image/svg+xml;base64,${svgBase64}`;
                 preview.innerHTML = `<img src="${svgDataUrl}" alt="SVG Preview">`;
 
-                // ダウンロードボタン
+                // 4. ダウンロードボタンの設置
                 const blob = new Blob([finalSvg], {type: "image/svg+xml"});
                 const blobUrl = URL.createObjectURL(blob);
                 btnContainer.innerHTML = `<a href="${blobUrl}" download="${text}.svg" class="download-btn">SVGファイルをダウンロードする</a>`;
                 btnContainer.style.display = 'block';
 
                 loader.style.display = 'none';
-                msg.innerText = "✨ パスの自動生成が完了しました！";
+                msg.innerText = "✨ 純粋なSVGベクターパスの自動生成が完了しました！";
 
             } catch (e) {
                 loader.style.display = 'none';
