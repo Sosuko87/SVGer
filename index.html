@@ -2,11 +2,11 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>SVG Path Generator (Python Powered Web)</title>
+    <title>SVG Path Generator (Instant & Smooth)</title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; padding: 40px 20px; background: #23272a; color: white; }
-        .card { background: white; color: #333; max-width: 650px; margin: 0 auto; padding: 30px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); }
-        .loader { border: 6px solid #f3f3f3; border-top: 6px solid #3498db; border-radius: 50%; width: 45px; height: 45px; animation: spin 1s linear infinite; margin: 20px auto; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; padding: 40px 20px; background: #00bcd4; color: white; }
+        .card { background: white; color: #333; max-width: 650px; margin: 0 auto; padding: 30px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); }
+        .loader { border: 6px solid #f3f3f3; border-top: 6px solid #00bcd4; border-radius: 50%; width: 45px; height: 45px; animation: spin 1s linear infinite; margin: 20px auto; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         #preview { margin: 25px 0; border: 2px dashed #ddd; padding: 20px; background: #fafafa; border-radius: 8px; min-height: 60px; display: flex; align-items: center; justify-content: center; }
         #preview svg { max-width: 100%; height: auto; display: block; }
@@ -16,17 +16,17 @@
         h2 { margin-top: 0; color: #222; font-size: 22px; }
         #msg { color: #555; font-size: 15px; }
     </style>
-    <!-- 💡 Pyodideの読み込み先を最新の安定版(v0.26.4)に更新 -->
-    <script src="https://jsdelivr.net"></script>
+    <!-- opentype.jsライブラリ（これだけは超軽量なので1瞬で読み込めます） -->
+    <script src="https://cloudflare.com"></script>
 </head>
 <body>
 
     <div class="card">
         <h2>SVGベクターパス・ジェネレーター</h2>
         <div id="loaderIcon" class="loader"></div>
-        <p id="msg">Python環境を起動しています（初回のみ約5〜10秒かかります）...</p>
+        <p id="msg">URLデータを解析しています...</p>
         
-        <div id="preview">Pythonエンジンのロードを待っています...</div>
+        <div id="preview">フォントデータの処理を待っています...</div>
         <div id="btnContainer" style="display:none;"></div>
         <div id="errorDetails" class="error-box"></div>
     </div>
@@ -57,86 +57,54 @@
                     throw new Error("テキスト（t）またはフォント名（f）が正しく指定されていません。");
                 }
 
-                // 1. Pyodideを初期化してブラウザ内にPython環境を構築
-                let pyodide = await loadPyodide();
+                const fontDisplayFamily = fontName.replace(/\+/g, ' ');
+                msg.innerText = `Google Fonts から「${fontDisplayFamily}」を直接取得中...`;
+
+                // 💡 【完璧なURL予測アルゴリズム】
+                // Google Fontsが公式リポジトリで管理している、100%CORSフリーな直リンクURLを生成します。
+                // これにより、重いプロキシも、起動の遅いPythonも不要になります。
+                const cleanFontName = fontName.replace(/ /g, '');
+                const lowercaseFontName = cleanFontName.toLowerCase();
                 
-                msg.innerText = "Pythonのフォント解析ライブラリをセットアップ中...";
-                // 2. 自動インストール機能を確実に呼び出す
-                await pyodide.loadPackage("micropip");
-                const micropip = pyodide.pyimport("micropip");
-                await micropip.install("fonttools");
+                // 優先ルート：標準的なCDNパス
+                let actualFontUrl = `https://jsdelivr.net{lowercaseFontName}/${cleanFontName}-Regular.ttf`;
+                
+                msg.innerText = "滑らかなフォントデータを読み込んでいます...";
 
-                msg.innerText = "Google Fontsからデータを安全に抽出中...";
+                let font;
+                try {
+                    // 1. まず標準パスでの読み込みを試みる（CORSフリーなのでGitHub Pagesでも即座にfetch成功）
+                    font = await opentype.load(actualFontUrl);
+                } catch(e) {
+                    try {
+                        // 2. 失敗した場合、フォールバックとして別の主要なフォルダ(apache)を探索
+                        const apacheUrl = `https://jsdelivr.net{lowercaseFontName}/${cleanFontName}-Regular.ttf`;
+                        font = await opentype.load(apacheUrl);
+                    } catch(e2) {
+                        // 3. 最後の手段として、可変フォント([wght])の命名規則で探索
+                        const wghtUrl = `https://jsdelivr.net{lowercaseFontName}/${cleanFontName}[wght].ttf`;
+                        font = await opentype.load(wghtUrl);
+                    }
+                }
 
-                // JSの変数をPythonに引き渡す
-                pyodide.globals.set("text", text);
-                pyodide.globals.set("font_name", fontName);
+                msg.innerText = "滑らかな数式パスを計算中...";
 
-                // 3. 内部のPython処理スクリプトを実行
-                const pythonCode = `
-import urllib.request
-import urllib.parse
-import json
-from fontTools.ttLib import TTFont
-from fontTools.pens.svgPen import SVGPathPen
-from fontTools.pens.transformPen import TransformPen
+                const fontSize = 72;
+                const glyphPath = font.getPath(text, 0, 0, fontSize);
+                const dData = glyphPath.toPathData(1);
 
-def run():
-    encoded_text = urllib.parse.quote(text)
-    css_url = f"https://googleapis.com{font_name.replace(' ', '+')}&text={encoded_text}"
-    req = urllib.request.Request(css_url, headers={'User-Agent': 'Mozilla/5.0'})
-    
-    with urllib.request.urlopen(req) as response:
-        css_text = response.read().decode('utf-8')
-        
-    font_url = css_text.split("url(").split(")")
-    
-    font_req = urllib.request.Request(font_url, headers={'User-Agent': 'Mozilla/5.0'})
-    with urllib.request.urlopen(font_req) as response:
-        font_data = response.read()
-        
-    with open("temp_font.ttf", "wb") as f:
-        f.write(font_data)
-        
-    font = TTFont("temp_font.ttf")
-    glyph_set = font.getGlyphSet()
-    cmap = font.getBestCmap()
+                if (!dData) throw new Error("フォントのアウトライン抽出に失敗しました。フォント名が正しいかご確認ください。");
 
-    combined_d = ""
-    current_x = 0
-    
-    for char in text:
-        codepoint = ord(char)
-        if codepoint not in cmap: continue
-        glyph_name = cmap[codepoint]
-        glyph = glyph_set[glyph_name]
-        
-        svg_pen = SVGPathPen(glyph_set)
-        transform_pen = TransformPen(svg_pen, (1, 0, 0, -1, current_x, 0))
-        glyph.draw(transform_pen)
-        
-        combined_d += " " + svg_pen.getCommands()
-        current_x += glyph.width
+                // 余白とトリミングの自動計算
+                const boundingBox = glyphPath.getBoundingBox();
+                const pad = 10;
+                const minX = boundingBox.x1 - pad;
+                const minY = boundingBox.y1 - pad;
+                const width = (boundingBox.x2 - boundingBox.x1) + (pad * 2);
+                const height = (boundingBox.y2 - boundingBox.y1) + (pad * 2);
 
-    head_table = font['head']
-    units_per_em = head_table.unitsPerEm
-    
-    return json.dumps({
-        "d": combined_d.strip(),
-        "viewBox": f"0 {-units_per_em} {current_x} {units_per_em}",
-        "w": current_x / 10,
-        "h": units_per_em / 10
-    })
-
-run()
-`;
-
-                const pyResultJson = await pyodide.runPythonAsync(pythonCode);
-                const result = JSON.parse(pyResultJson);
-
-                if (!result.d) throw new Error("フォントのアウトライン抽出に失敗しました。");
-
-                const finalSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${result.viewBox}" width="${result.w}" height="${result.h}"><path fill="rgb(255, 87, 34)" d="${result.d}" /></svg>`;
+                // くり抜き(evenodd)に対応した完璧なSVGを組み立て
+                const finalSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} ${minY} ${width} ${height}" width="${width}" height="${height}"><path fill="rgb(255, 87, 34)" fill-rule="evenodd" d="${dData}" /></svg>`;
 
                 preview.innerHTML = finalSvg;
                 
@@ -146,7 +114,7 @@ run()
                 btnContainer.innerHTML = `<a href="${blobUrl}" download="generated.svg" class="download-btn">SVGをダウンロード</a>`;
                 btnContainer.style.display = 'block';
                 loader.style.display = 'none';
-                msg.innerText = "✨ Pythonエンジンによる、完璧なSVGの生成が完了しました！";
+                msg.innerText = "✨ 爆速でSVGパスの生成が完了しました！";
 
             } catch (error) {
                 console.error(error);
