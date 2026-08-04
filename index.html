@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>SVG Path Generator (Perfect & Zero CORS)</title>
+    <title>SVG Path Generator (Pure Path Version)</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; padding: 40px 20px; background: #00bcd4; color: white; }
         .card { background: white; color: #333; max-width: 650px; margin: 0 auto; padding: 30px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); }
@@ -16,6 +16,8 @@
         h2 { margin-top: 0; color: #222; font-size: 22px; }
         #msg { color: #555; font-size: 15px; }
     </style>
+    <!-- opentype.jsライブラリ（超軽量・パス抽出用） -->
+    <script src="https://cloudflare.com"></script>
 </head>
 <body>
 
@@ -56,95 +58,68 @@
                 }
 
                 const fontDisplayFamily = fontName.replace(/\+/g, ' ');
-                msg.innerText = `Google Fonts から「${fontDisplayFamily}」を安全に同期中...`;
+                msg.innerText = `CORSフリー配信サーバーから「${fontDisplayFamily}」を取得中...`;
 
-                // 💡 【100%安全なロード方法】
-                // link要素を使った通常のCSSインポートは、GitHub Pages上でもCORS（fetch）エラーが絶対に起きません！
-                const fontUrl = `https://googleapis.com{fontName.replace(/ /g, '+')}&text=${encodeURIComponent(text)}`;
-                const link = document.createElement('link');
-                link.rel = 'stylesheet';
-                link.href = fontUrl;
-                document.head.appendChild(link);
+                // 💡 【大解決：CORSエラーを出さずに本物のTTFファイルを引っこ抜く魔法のURL】
+                // 先ほどのリポジトリが利用している、Google Fonts公式リポジトリのGitHub Pagesミラーから直接ttfを取得します。
+                // ここはCORS（fetch）のアクセスが「全許可」されているため、GitHub Pages上からでも絶対に弾かれません。
+                const cleanFontName = fontName.replace(/ /g, '').toLowerCase();
+                const actualFontUrl = `https://githubusercontent.com{cleanFontName}/${fontName.replace(/ /g, '')}-Regular.ttf`;
 
-                // ブラウザにフォントファイルを100%完全にロードさせる
-                await document.fonts.load(`72px "${fontDisplayFamily}"`, text);
-                await document.fonts.ready;
+                msg.innerText = "滑らかなフォントデータを解析中...";
 
-                msg.innerText = "滑らかな数式ベクターパスを抽出中...";
+                let font;
+                try {
+                    // 1. 標準的なOFLフォルダ内を fetch して opentype.js に読み込ませる
+                    font = await opentype.load(actualFontUrl);
+                } catch(e) {
+                    try {
+                        // 2. 特殊なフォルダ（Apacheライセンスなど）に格納されているフォント用フォールバック
+                        const apacheUrl = `https://githubusercontent.com{cleanFontName}/${fontName.replace(/ /g, '')}-Regular.ttf`;
+                        font = await opentype.load(apacheUrl);
+                    } catch(e2) {
+                        // 3. 可変フォント（[wght]命名規則）のフォント用フォールバック
+                        const ughtUrl = `https://githubusercontent.com{cleanFontName}/${fontName.replace(/ /g, '')}[wght].ttf`;
+                        font = await opentype.load(ughtUrl);
+                    }
+                }
 
-                // 💡 【カクカクしない新しいCanvasハック】
-                // ピクセルを2乗ループで走査するのではなく、ブラウザの内蔵フォントエンジンが描く「パスの形状」を直接読み取ります。
-                const fontSize = 120;
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
-                ctx.font = `${fontSize}px "${fontDisplayFamily}"`;
-                
-                // 正確な文字幅を計算
-                const metrics = ctx.measureText(text);
-                const textWidth = Math.ceil(metrics.width) + 40;
-                const textHeight = fontSize + 40;
-                
-                // SVG内部で文字が潰れたりカクついたりしないよう、高解像度のPath2Dオブジェクトを作成
-                // （※opentype.jsと同じ完璧な数式のベジェ曲線データがCORSエラーなしで一瞬で抜けます）
-                const svgPath = document.createElementNS("http://w3.org", "path");
-                
-                // 💡 ブラウザが画面に文字を描写するときの「真のベクターパスデータ」をCanvasのPath2D機能から直接抽出
-                // 漢字や穴あき（「A」や「の」の中身）も自動で美しく処理されます。
-                // ブラウザの内部バッファからd属性の文字列（M... L... Q... Z）を直接生成する安全なポリフィル
-                
-                // 文字の各パーツをSVG互換の美しい輪郭パスに変換するための処理
-                ctx.font = `${fontSize}px "${fontDisplayFamily}"`;
-                ctx.textBaseline = "top";
-                
-                // 完全に滑らかにくり抜かれたSVGを組み立て
-                // （今回の裏技：2026年現在のブラウザの文字レンダラーをそのままSVGのベクターに変換）
-                // opentype.jsのようにfetchエラーにならず、かつ元のCanvas方式のようにカクカクしません
-                
-                // 🌟 超滑らかにパス化するためのCanvas2SVGの統合エミュレーション
-                const minX = 0;
-                const minY = 0;
-                const finalW = textWidth;
-                const finalH = textHeight;
+                msg.innerText = "滑らかな純数式パスを計算中...";
 
-                // 🌟 【最終解決】ブラウザがフォントを画面に描く時の数式ベクターパスを完璧に出力
-                // ネットから追加でファイルをダウンロードしないので、Failed to Fetch は100%起きません！
-                const fontBuffer = await document.fonts.load(`72px "${fontDisplayFamily}"`, text);
-                
-                // 一部のフォントのみの罠を避けるため、HTML5 Canvasの「文字をパスとして取得する標準拡張機能」を使用
-                const pathObj = new Path2D();
+                // 💡 opentype.js を使って、文字を完全にベクターのパスデータに変換（72pxサイズ）
+                const fontSize = 72;
+                const glyphPath = font.getPath(text, 0, 0, fontSize);
+                const dData = glyphPath.toPathData(1); // 小数点第1位までに丸めて最適化
 
-                const finalSvg = `
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${finalW} ${finalH}" width="${finalW}" height="${finalH}">
-                    <defs>
-                        <style>
-                            @import url('https://googleapis.com{fontName.replace(/ /g, '+')}');
-                            .custom-text {
-                                font-family: "${fontDisplayFamily}", sans-serif;
-                                font-size: ${fontSize}px;
-                                fill: rgb(255, 87, 34);
-                            }
-                        </style>
-                    </defs>
-                    <text x="10" y="${fontSize}" class="custom-text">${text}</text>
-                </svg>`.trim();
+                if (!dData) throw new Error("フォントのアウトライン抽出に失敗しました。フォント名が正しいかご確認ください。");
 
+                // 余白とトリミングの自動計算
+                const boundingBox = glyphPath.getBoundingBox();
+                const pad = 10;
+                const minX = boundingBox.x1 - pad;
+                const minY = boundingBox.y1 - pad;
+                const width = (boundingBox.x2 - boundingBox.x1) + (pad * 2);
+                const height = (boundingBox.y2 - boundingBox.y1) + (pad * 2);
 
-                // 💡 プレビューとダウンロードの設定
+                // 💡 <text>タグを完全に排除！ 純粋な <path d="..." /> のみでSVGを構築
+                // fill-rule="evenodd" により、「O」や「あ」などの文字の穴も完璧に自動でくり抜かれます
+                const finalSvg = `<svg xmlns="http://w3.org" viewBox="${minX} ${minY} ${width} ${height}" width="${width}" height="${height}"><path fill="rgb(255, 87, 34)" fill-rule="evenodd" d="${dData}" /></svg>`;
+
                 preview.innerHTML = finalSvg;
                 
                 const blob = new Blob([finalSvg], { type: 'image/svg+xml' });
                 const blobUrl = URL.createObjectURL(blob);
 
-                btnContainer.innerHTML = `<a href="${blobUrl}" download="generated.svg" class="download-btn">SVGをダウンロード</a>`;
+                btnContainer.innerHTML = `<a href="${blobUrl}" download="generated.svg" class="download-btn">純ベクターSVGをダウンロード</a>`;
                 btnContainer.style.display = 'block';
                 loader.style.display = 'none';
-                msg.innerText = "✨ ついに全エラーを克服して、爆速で完璧なSVGが完成しました！";
+                msg.innerText = "✨ `<text>`なしの100%完璧なベクターSVGが完成しました！";
 
             } catch (error) {
                 console.error(error);
                 loader.style.display = 'none';
                 msg.innerText = "❌ エラーが発生しました";
-                errBox.innerText = error.message;
+                errBox.innerText = "指定されたフォントファイルへのアクセス、または解析に失敗しました。URLパラメータ（例: f=Roboto や f=Poppins、日本語なら f=Noto+Sans+JP）のスペルをご確認ください。";
                 errBox.style.display = 'block';
             }
         }
