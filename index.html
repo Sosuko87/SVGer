@@ -112,10 +112,7 @@
                 
                 // 一部のフォントのみの罠を避けるため、HTML5 Canvasの「文字をパスとして取得する標準拡張機能」を使用
                 const pathObj = new Path2D();
-                
-                // ブラウザが内部で持っている完璧なアウトラインベクター（dデータ）
-                // opentype.jsが fetch でコケるなら、代わりにインラインSVGとしてフォントそのものを埋め込むことで、
-                // 通信エラーを完全に「物理破壊」し、かつ全フォントで超滑らかなSVGを出力します！
+
                 const finalSvg = `
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${finalW} ${finalH}" width="${finalW}" height="${finalH}">
                     <defs>
@@ -130,6 +127,7 @@
                     </defs>
                     <text x="10" y="${fontSize}" class="custom-text">${text}</text>
                 </svg>`.trim();
+
 
                 // 💡 プレビューとダウンロードの設定
                 preview.innerHTML = finalSvg;
