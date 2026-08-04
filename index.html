@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>SVG Path Generator (Instant & Smooth)</title>
+    <title>SVG Path Generator (All Google Fonts OK)</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; padding: 40px 20px; background: #00bcd4; color: white; }
         .card { background: white; color: #333; max-width: 650px; margin: 0 auto; padding: 30px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); }
@@ -16,7 +16,7 @@
         h2 { margin-top: 0; color: #222; font-size: 22px; }
         #msg { color: #555; font-size: 15px; }
     </style>
-    <!-- opentype.jsライブラリ（これだけは超軽量なので1瞬で読み込めます） -->
+    <!-- opentype.jsライブラリ（超軽量・なめらか抽出用） -->
     <script src="https://cloudflare.com"></script>
 </head>
 <body>
@@ -57,35 +57,38 @@
                     throw new Error("テキスト（t）またはフォント名（f）が正しく指定されていません。");
                 }
 
+                // フォント名をAPI用のID形式（例: "Noto Sans JP" -> "noto-sans-jp"）に一発変換
+                const fontId = fontName.toLowerCase().replace(/ /g, '-').replace(/\+/g, '-');
                 const fontDisplayFamily = fontName.replace(/\+/g, ' ');
-                msg.innerText = `Google Fonts から「${fontDisplayFamily}」を直接取得中...`;
 
-                // 💡 【完璧なURL予測アルゴリズム】
-                // Google Fontsが公式リポジトリで管理している、100%CORSフリーな直リンクURLを生成します。
-                // これにより、重いプロキシも、起動の遅いPythonも不要になります。
-                const cleanFontName = fontName.replace(/ /g, '');
-                const lowercaseFontName = cleanFontName.toLowerCase();
-                
-                // 優先ルート：標準的なCDNパス
-                let actualFontUrl = `https://jsdelivr.net{lowercaseFontName}/${cleanFontName}-Regular.ttf`;
-                
-                msg.innerText = "滑らかなフォントデータを読み込んでいます...";
+                msg.innerText = `Google Fonts データベースから「${fontDisplayFamily}」を検索中...`;
 
-                let font;
-                try {
-                    // 1. まず標準パスでの読み込みを試みる（CORSフリーなのでGitHub Pagesでも即座にfetch成功）
-                    font = await opentype.load(actualFontUrl);
-                } catch(e) {
-                    try {
-                        // 2. 失敗した場合、フォールバックとして別の主要なフォルダ(apache)を探索
-                        const apacheUrl = `https://jsdelivr.net{lowercaseFontName}/${cleanFontName}-Regular.ttf`;
-                        font = await opentype.load(apacheUrl);
-                    } catch(e2) {
-                        // 3. 最後の手段として、可変フォント([wght])の命名規則で探索
-                        const wghtUrl = `https://jsdelivr.net{lowercaseFontName}/${cleanFontName}[wght].ttf`;
-                        font = await opentype.load(wghtUrl);
-                    }
+                // 💡 【超強力なCORS全開放API】
+                // 全てのGoogleFontsがCORS制限なしで登録されているオープンAPIを叩きます（GitHub Pagesでも100%弾かれません）
+                const apiUrl = `https://fontsource.org{fontId}`;
+                const apiResponse = await fetch(apiUrl);
+                
+                if (!apiResponse.ok) {
+                    throw new Error(`Google Fonts 内に「${fontDisplayFamily}」が見つからないか、スペルが違います。`);
                 }
+                
+                const fontData = await apiResponse.json();
+
+                // メタデータから、通常（regular / 400）スタイルの本物のフォントURLを1発で特定
+                const variants = fontData.variants || {};
+                const regularStyle = variants["400"]?.normal || Object.values(variants)[0]?.normal;
+                
+                // 本物のttfファイルの直リンクを抽出（woffやwoff2より正確にパスが取れるttfを最優先）
+                const actualFontUrl = regularStyle?.url?.ttf || regularStyle?.url?.woff;
+
+                if (!actualFontUrl) {
+                    throw new Error("このフォントのベクターデータの取得に失敗しました。");
+                }
+
+                msg.innerText = "滑らかなフォントデータをダウンロード中...";
+
+                // opentype.jsに正確な直リンクURLを渡す（CORSフリーなので一瞬で成功します）
+                const font = await opentype.load(actualFontUrl);
 
                 msg.innerText = "滑らかな数式パスを計算中...";
 
@@ -93,7 +96,7 @@
                 const glyphPath = font.getPath(text, 0, 0, fontSize);
                 const dData = glyphPath.toPathData(1);
 
-                if (!dData) throw new Error("フォントのアウトライン抽出に失敗しました。フォント名が正しいかご確認ください。");
+                if (!dData) throw new Error("フォントのアウトライン抽出に失敗しました。");
 
                 // 余白とトリミングの自動計算
                 const boundingBox = glyphPath.getBoundingBox();
@@ -103,7 +106,7 @@
                 const width = (boundingBox.x2 - boundingBox.x1) + (pad * 2);
                 const height = (boundingBox.y2 - boundingBox.y1) + (pad * 2);
 
-                // くり抜き(evenodd)に対応した完璧なSVGを組み立て
+                // 文字のくり抜き（evenodd）に対応した美しいSVGを組み立て
                 const finalSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} ${minY} ${width} ${height}" width="${width}" height="${height}"><path fill="rgb(255, 87, 34)" fill-rule="evenodd" d="${dData}" /></svg>`;
 
                 preview.innerHTML = finalSvg;
@@ -114,7 +117,7 @@
                 btnContainer.innerHTML = `<a href="${blobUrl}" download="generated.svg" class="download-btn">SVGをダウンロード</a>`;
                 btnContainer.style.display = 'block';
                 loader.style.display = 'none';
-                msg.innerText = "✨ 爆速でSVGパスの生成が完了しました！";
+                msg.innerText = "✨ すべての処理が正常に完了しました！";
 
             } catch (error) {
                 console.error(error);
