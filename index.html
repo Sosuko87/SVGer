@@ -1,36 +1,136 @@
-<script>
-    window.onload = async function() {
-        // 1. URLのハッシュからパラメータを抜き取る
-        const hash = window.location.hash.substr(1);
-        const urlParams = new URLSearchParams(hash.startsWith('?') ? hash : '?' + hash);
-        const text = decodeURIComponent(urlParams.get('t') || '');
-        const font = decodeURIComponent(urlParams.get('f') || '');
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>SVG Path Generator</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; padding: 40px 20px; background: #f55722; color: white; }
+        .card { background: white; color: #333; max-width: 650px; margin: 0 auto; padding: 30px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); }
+        .loader { border: 6px solid #f3f3f3; border-top: 6px solid #f55722; border-radius: 50%; width: 45px; height: 45px; animation: spin 1s linear infinite; margin: 20px auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        #preview { margin: 25px 0; border: 2px dashed #ddd; padding: 20px; background: #fafafa; border-radius: 8px; min-height: 60px; display: flex; align-items: center; justify-content: center; }
+        #preview img { max-width: 100%; height: auto; }
+        .download-btn { background: #28a745; color: white; border: none; padding: 14px 28px; font-size: 16px; font-weight: bold; border-radius: 8px; cursor: pointer; text-decoration: none; display: inline-block; transition: background 0.2s; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .download-btn:hover { background: #218838; }
+        .error-box { background: #ffe3e3; color: #d63031; padding: 15px; border-radius: 8px; display: none; text-align: left; font-family: monospace; font-size: 13px; border-left: 5px solid #d63031; margin-top: 20px; }
+        h2 { margin-top: 0; color: #222; font-size: 22px; }
+        #msg { color: #555; font-size: 15px; }
+    </style>
+    <!-- 💡 【解決策】安全な本物サイトになったので、CDNから1行で超軽量ライブラリをインポートします -->
+    <script src="https://cloudflare.com"></script>
+</head>
+<body>
 
-        if (!text || !font) return;
+    <div class="card">
+        <h2>SVGベクターパス・ジェネレーター</h2>
+        <div id="loaderIcon" class="loader"></div>
+        <p id="msg">URLデータを解析しています...</p>
+        
+        <div id="preview">フォントデータの処理を待っています...</div>
+        <div id="btnContainer" style="display:none;"></div>
+        <div id="errorDetails" class="error-box"></div>
+    </div>
 
-        // 2. 【重要】GitHub Actionsを起動するためのAPIリクエスト（Repository Dispatch）
-        const githubOwner = "あなたのGitHubユーザー名";
-        const githubRepo = "あなたのリポジトリ名";
-        const token = "YOUR_GITHUB_PERSONAL_ACCESS_TOKEN"; // ※注意：トークンの扱いに注意（後述）
+    <script>
+        async function init() {
+            const msg = document.getElementById('msg');
+            const errBox = document.getElementById('errorDetails');
+            const loader = document.getElementById('loaderIcon');
+            const preview = document.getElementById('preview');
+            const btnContainer = document.getElementById('btnContainer');
 
-        const response = await fetch(`https://github.com{githubOwner}/${githubRepo}/dispatches`, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Accept': 'application/vnd.github.v3+json',
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                event_type: 'trigger_font_svg', // トリガー名
-                client_payload: {
-                    text_data: text, // 抜き取った文字情報を引数として渡す
-                    font_data: font
+            const hash = window.location.hash.substr(1);
+            if (!hash) {
+                loader.style.display = 'none';
+                msg.innerText = "⚠️ 起動データなし";
+                preview.innerText = "URLの末尾にテキストとフォント情報を追加してください。";
+                return;
+            }
+
+            try {
+                if (typeof opentype === 'undefined') {
+                    throw new Error("フォント解析ライブラリの読み込みに失敗しました。ネットワークを確認してください。");
                 }
-            })
-        });
 
-        if (response.ok) {
-            document.getElementById('msg').innerText = "🚀 GitHubサーバーにデータを送信しました！生成を待っています...";
+                const searchParamsString = hash.startsWith('?') ? hash : '?' + hash;
+                const urlParams = new URLSearchParams(searchParamsString);
+                const text = decodeURIComponent(urlParams.get('t') || '');
+                const fontName = decodeURIComponent(urlParams.get('f') || '').trim().replace(/ /g, '+');
+
+                if (!text || !fontName) {
+                    throw new Error("テキスト、またはフォント名（f）が正しく指定されていません。");
+                }
+
+                const fontDisplayFamily = fontName.replace(/\+/g, ' ');
+                msg.innerText = `Google Fonts から「${fontDisplayFamily}」を動的同期中...`;
+
+                // 1. 動的linkタグによるフォントファイルの同期
+                const link = document.createElement('link');
+                link.rel = 'stylesheet';
+                link.href = `https://googleapis.com{fontName}&text=${encodeURIComponent(text)}`;
+                document.head.appendChild(link);
+
+                // フォントロードを安全に監視
+                await document.fonts.load(`12px "${fontDisplayFamily}"`, text).catch(() => {
+                    throw new Error("フォントのロード中にタイムアウト、またはエラーが発生しました。");
+                });
+                await document.fonts.ready;
+
+                // 2. ブラウザのキャッシュからバイナリ抽出
+                let matchedFontData = null;
+                const readyFonts = await document.fonts.ready;
+                for (let fontFace of readyFonts) {
+                    if (fontFace.family.toLowerCase().replace(/["']/g, '').replace(/ /g, '+') === fontName.toLowerCase()) {
+                        const response = await fetch(fontFace.src || fontFace.url); 
+                        matchedFontData = await response.arrayBuffer();
+                        break;
+                    }
+                }
+
+                if (!matchedFontData) {
+                    throw new Error("ブラウザからフォントの生の幾何バイナリを抽出できませんでした。");
+                }
+
+                // 3. ベクターパスの解析
+                const font = opentype.parse(matchedFontData);
+                const path = font.getPath(text, 0, 84, 72);
+                const box = path.getBoundingBox();
+                const w = Math.ceil(box.x2 - box.x1) + 60;
+
+                const svgPath = font.getPath(text, 30 - box.x1, 84, 72).toSVG(5);
+                const finalSvg = `<svg xmlns="http://w3.org" viewBox="0 0 ${w} 120" width="${w}" height="120"><g fill="rgb(255, 87, 34)">${svgPath}</g></svg>`;
+
+                // 4. プレビュー用画像（DataURL）の構築
+                const svgBase64 = btoa(new TextEncoder().encode(finalSvg).reduce((data, byte) => data + String.fromCharCode(byte), ''));
+                const svgDataUrl = `data:image/svg+xml;base64,${svgBase64}`;
+                
+                preview.innerHTML = `<img src="${svgDataUrl}" alt="SVG Preview">`;
+
+                // 5. ボタンコンテナの生成＆設置
+                const blob = new Blob([finalSvg], {type: "image/svg+xml"});
+                const blobUrl = URL.createObjectURL(blob);
+                
+                btnContainer.innerHTML = `<a href="${blobUrl}" download="${text}.svg" class="download-btn">SVGファイルをダウンロードする</a>`;
+                btnContainer.style.display = 'block';
+
+                // 6. 全自動ダウンロード
+                const a = document.createElement('a');
+                a.href = blobUrl;
+                a.download = `${text}.svg`;
+                a.click();
+
+                loader.style.display = 'none';
+                msg.innerText = "✨ 処理完了！";
+
+            } catch (e) {
+                loader.style.display = 'none';
+                msg.innerText = "❌ 処理に失敗しました";
+                errBox.style.display = 'block';
+                errBox.innerText = e.message;
+                preview.innerText = "エラーのためプレビューを表示できません。";
+            }
         }
-    };
-</script>
+        init();
+    </script>
+</body>
+</html>
