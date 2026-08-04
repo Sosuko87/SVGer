@@ -16,7 +16,7 @@
         h2 { margin-top: 0; color: #222; font-size: 22px; }
         #msg { color: #555; font-size: 15px; }
     </style>
-    <!-- 💡 【解決策】安全な本物サイトになったので、CDNから1行で超軽量ライブラリをインポートします -->
+    <!-- 💡 本物の opentype.js ライブラリをCDNから読み込みます -->
     <script src="https://cloudflare.com"></script>
 </head>
 <body>
@@ -39,88 +39,78 @@
             const preview = document.getElementById('preview');
             const btnContainer = document.getElementById('btnContainer');
 
+            // ハッシュ（#）以降を取得
             const hash = window.location.hash.substr(1);
             if (!hash) {
                 loader.style.display = 'none';
                 msg.innerText = "⚠️ 起動データなし";
-                preview.innerText = "URLの末尾にテキストとフォント情報を追加してください。";
+                preview.innerText = "URLの末尾に「#t=テキスト&f=フォント名」の形式で情報を追加してください。";
                 return;
             }
 
             try {
                 if (typeof opentype === 'undefined') {
-                    throw new Error("フォント解析ライブラリの読み込みに失敗しました。ネットワークを確認してください。");
+                    throw new Error("フォント解析ライブラリ（opentype.js）の読み込みに失敗しました。");
                 }
 
                 const searchParamsString = hash.startsWith('?') ? hash : '?' + hash;
                 const urlParams = new URLSearchParams(searchParamsString);
-                const text = decodeURIComponent(urlParams.get('t') || '');
+                const text = decodeURIComponent(urlParams.get('t') || '').trim();
                 const fontName = decodeURIComponent(urlParams.get('f') || '').trim().replace(/ /g, '+');
 
                 if (!text || !fontName) {
-                    throw new Error("テキスト、またはフォント名（f）が正しく指定されていません。");
+                    throw new Error("テキスト（t）またはフォント名（f）が正しく指定されていません。例: #t=Hello&f=Roboto");
                 }
 
                 const fontDisplayFamily = fontName.replace(/\+/g, ' ');
                 msg.innerText = `Google Fonts から「${fontDisplayFamily}」を動的同期中...`;
 
-                // 1. 動的linkタグによるフォントファイルの同期
+                // 1. CSSファイルのURLを修正して読み込み
                 const link = document.createElement('link');
                 link.rel = 'stylesheet';
                 link.href = `https://googleapis.com{fontName}&text=${encodeURIComponent(text)}`;
                 document.head.appendChild(link);
 
-                // フォントロードを安全に監視
-                await document.fonts.load(`12px "${fontDisplayFamily}"`, text).catch(() => {
-                    throw new Error("フォントのロード中にタイムアウト、またはエラーが発生しました。");
-                });
-                await document.fonts.ready;
-
-                // 2. ブラウザのキャッシュからバイナリ抽出
-                let matchedFontData = null;
-                const readyFonts = await document.fonts.ready;
-                for (let fontFace of readyFonts) {
-                    if (fontFace.family.toLowerCase().replace(/["']/g, '').replace(/ /g, '+') === fontName.toLowerCase()) {
-                        const response = await fetch(fontFace.src || fontFace.url); 
-                        matchedFontData = await response.arrayBuffer();
-                        break;
-                    }
+                // 2. CSS内から実際のTTF/WOFFファイルの直URLを特定してバイナリを取得する
+                const cssResponse = await fetch(link.href);
+                const cssText = await cssResponse.text();
+                const fontUrlMatch = cssText.match(/url\((https:\/\/[^)]+)\)/);
+                
+                if (!fontUrlMatch) {
+                    throw new Error("Google Fonts からフォントファイルのURLを取得できませんでした。指定したフォント名が正しいか確認してください。");
                 }
+                
+                const actualFontUrl = fontUrlMatch[1].replace(/['"]/g, '');
+                
+                // 3. フォントの生幾何バイナリ（ArrayBuffer）を取得
+                const fontResponse = await fetch(actualFontUrl);
+                const matchedFontData = await fontResponse.arrayBuffer();
 
-                if (!matchedFontData) {
-                    throw new Error("ブラウザからフォントの生の幾何バイナリを抽出できませんでした。");
-                }
-
-                // 3. ベクターパスの解析
+                // 4. ベクターパスの解析とSVG生成
                 const font = opentype.parse(matchedFontData);
                 const path = font.getPath(text, 0, 84, 72);
                 const box = path.getBoundingBox();
                 const w = Math.ceil(box.x2 - box.x1) + 60;
 
                 const svgPath = font.getPath(text, 30 - box.x1, 84, 72).toSVG(5);
+                // xmlnsのURLを正しいものに修正
                 const finalSvg = `<svg xmlns="http://w3.org" viewBox="0 0 ${w} 120" width="${w}" height="120"><g fill="rgb(255, 87, 34)">${svgPath}</g></svg>`;
 
-                // 4. プレビュー用画像（DataURL）の構築
-                const svgBase64 = btoa(new TextEncoder().encode(finalSvg).reduce((data, byte) => data + String.fromCharCode(byte), ''));
+                // 5. プレビュー用画像（DataURL）の構築（安全な現代の変換方法）
+                const svgBase64 = btoa(unescape(encodeURIComponent(finalSvg)));
                 const svgDataUrl = `data:image/svg+xml;base64,${svgBase64}`;
                 
                 preview.innerHTML = `<img src="${svgDataUrl}" alt="SVG Preview">`;
 
-                // 5. ボタンコンテナの生成＆設置
+                // 6. ダウンロードボタンの設置
                 const blob = new Blob([finalSvg], {type: "image/svg+xml"});
                 const blobUrl = URL.createObjectURL(blob);
                 
                 btnContainer.innerHTML = `<a href="${blobUrl}" download="${text}.svg" class="download-btn">SVGファイルをダウンロードする</a>`;
                 btnContainer.style.display = 'block';
 
-                // 6. 全自動ダウンロード
-                const a = document.createElement('a');
-                a.href = blobUrl;
-                a.download = `${text}.svg`;
-                a.click();
-
                 loader.style.display = 'none';
-                msg.innerText = "✨ 処理完了！";
+                msg.innerText = "✨ 処理完了！ボタンからダウンロードできます。";
 
             } catch (e) {
                 loader.style.display = 'none';
@@ -128,6 +118,7 @@
                 errBox.style.display = 'block';
                 errBox.innerText = e.message;
                 preview.innerText = "エラーのためプレビューを表示できません。";
+                console.error(e);
             }
         }
         init();
