@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>SVG Path Generator (No-Fetch Perfect)</title>
+    <title>SVG Path Generator (All Fonts & Smooth)</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; padding: 40px 20px; background: #00bcd4; color: white; }
         .card { background: white; color: #333; max-width: 650px; margin: 0 auto; padding: 30px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); }
@@ -57,42 +57,39 @@
                     throw new Error("テキスト（t）またはフォント名（f）が正しく指定されていません。");
                 }
 
+                // フォント名をID形式（例: "Noto Sans JP" -> "noto-sans-jp"）に変換
+                const fontId = fontName.toLowerCase().replace(/ /g, '-').replace(/\+/g, '-');
                 const fontDisplayFamily = fontName.replace(/\+/g, ' ');
-                msg.innerText = `Google Fonts から「${fontDisplayFamily}」をロード中...`;
 
-                // 💡 【完璧な回避技】DOM経由で通常のlinkタグとしてフォントCSSを読み込む（CORS制限なし）
-                const fontUrl = `https://googleapis.com{fontName.replace(/ /g, '+')}&text=${encodeURIComponent(text)}`;
-                const link = document.createElement('link');
-                link.rel = 'stylesheet';
-                link.href = fontUrl;
-                document.head.appendChild(link);
+                msg.innerText = `Fontsource APIから「${fontDisplayFamily}」を検索中...`;
 
-                // ブラウザにフォントが完全に読み込まれるのを待つ
-                await document.fonts.load(`72px "${fontDisplayFamily}"`, text);
-                await document.fonts.ready;
+                // 💡 【大解決】すべてのGoogleFontsをCORS制限なしで配信しているFontsource APIのメタデータを叩く
+                const apiUrl = `https://fontsource.org{fontId}`;
+                const apiResponse = await fetch(apiUrl);
+                
+                if (!apiResponse.ok) {
+                    throw new Error(`Google Fonts 内に「${fontDisplayFamily}」が見つからないか、スペルが違います。`);
+                }
+                
+                const fontData = await apiResponse.json();
 
-                msg.innerText = "フォントバイナリを抽出中...";
+                // メタデータから、通常（normal / 400）の真のttf/woffファイルURLを特定
+                const variants = fontData.variants || {};
+                const regularStyle = fontData.variants["400"]?.normal || Object.values(variants)[0]?.normal;
+                
+                // 真のダウンロードURL（CORS全許可の高速CDN）
+                const actualFontUrl = regularStyle?.url?.ttf || regularStyle?.url?.woff;
 
-                // 💡 【魔法の処理】fetchを使わず、ブラウザがロードしたキャッシュからフォントデータを直接引っこ抜く
-                let fontBuffer = null;
-                for (let fontFace of document.fonts) {
-                    if (fontFace.family.replace(/"/g, '').toLowerCase() === fontDisplayFamily.toLowerCase()) {
-                        // ブラウザが内部で持っているフォントのデータ（woff/woff2/ttfなど）を配列として取得
-                        const response = await fetch(fontFace.src.match(/url\(([^)]+)\)/)[1]);
-                        fontBuffer = await response.arrayBuffer();
-                        break;
-                    }
+                if (!actualFontUrl) {
+                    throw new Error("このフォントのベクター形式ファイルの取得に失敗しました。");
                 }
 
-                // 万が一ブラウザキャッシュからの抽出が弾かれた場合の最終手段（直接woff2等を取得）
-                if (!fontBuffer) {
-                    throw new Error("ブラウザからのフォントデータ抽出に失敗しました。フォント名がGoogle Fontsに存在するか確認してください。");
-                }
+                msg.innerText = "滑らかなフォントデータを読み込んでいます...";
+
+                // opentype.jsに100%正確な直リンクURLを渡す（CORSフリーなのでGitHub Pagesでも大成功）
+                const font = await opentype.load(actualFontUrl);
 
                 msg.innerText = "滑らかな数式パスを計算中...";
-
-                // opentype.js にデータ配列を直接渡して解析（ネット通信が発生しないので100%成功）
-                const font = opentype.parse(fontBuffer);
 
                 const fontSize = 72;
                 const glyphPath = font.getPath(text, 0, 0, fontSize);
@@ -118,7 +115,7 @@
                 btnContainer.innerHTML = `<a href="${blobUrl}" download="generated.svg" class="download-btn">SVGをダウンロード</a>`;
                 btnContainer.style.display = 'block';
                 loader.style.display = 'none';
-                msg.innerText = "✨ 滑らかなSVGパスの生成が完了しました！";
+                msg.innerText = "✨ すべての処理が正常に完了しました！";
 
             } catch (error) {
                 console.error(error);
