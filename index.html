@@ -130,7 +130,7 @@
                 // ✨ テキストタグを一切使わない、100%完全に「線（<path d="..." />）」だけで書かれた純粋なSVGが完成！
                 const w = Math.ceil(textWidth * scale);
                 const h = Math.ceil(textHeight * scale);
-                const finalSvg = `<svg xmlns="http://w3.org" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><path fill="rgb(255, 87, 34)" d="${pathData}" /></svg>`;
+                const finalSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><path fill="rgb(255, 87, 34)" d="${pathData}" /></svg>`;
 
                 // 4. プレビュー用画像（DataURL）の構築
                 const svgBase64 = btoa(unescape(encodeURIComponent(finalSvg)));
