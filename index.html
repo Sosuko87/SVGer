@@ -16,7 +16,7 @@
         h2 { margin-top: 0; color: #222; font-size: 22px; }
         #msg { color: #555; font-size: 15px; }
     </style>
-    <!-- 先ほどアップしたローカルのopentype.jsを読み込み -->
+    <!-- あなたがGitHubにアップロードした本物のopentype.jsを読み込み -->
     <script src="opentype.js"></script>
 </head>
 <body>
@@ -49,63 +49,75 @@
 
             try {
                 if (typeof opentype === 'undefined') {
-                    throw new Error("フォント解析ライブラリの読み込みに失敗しました。");
+                    throw new Error("フォント解析ライブラリ（opentype.js）の読み込みに失敗しています。ファイルの配置を確認してください。");
                 }
 
                 const searchParamsString = hash.startsWith('?') ? hash : '?' + hash;
                 const urlParams = new URLSearchParams(searchParamsString);
                 const text = decodeURIComponent(urlParams.get('t') || '').trim();
-                const fontName = decodeURIComponent(urlParams.get('f') || '').trim().replace(/ /g, '+');
+                const fontName = decodeURIComponent(urlParams.get('f') || '').trim();
 
                 if (!text || !fontName) {
                     throw new Error("テキスト（t）またはフォント名（f）が正しく指定されていません。");
                 }
 
-                const fontDisplayFamily = fontName.replace(/\+/g, ' ');
-                msg.innerText = `Google Fonts から「${fontDisplayFamily}」を動的同期中...`;
+                msg.innerText = `Google Fonts から「${fontName}」のスタイル情報を取得中...`;
 
-                // 1. linkタグでGoogle FontsのCSSを読み込み（これはブラウザ標準機能なので安全）
-                const link = document.createElement('link');
-                link.rel = 'stylesheet';
-                link.href = `https://googleapis.com{fontName}&text=${encodeURIComponent(text)}`;
-                document.head.appendChild(link);
-
-                // フォントのロードを安全に待つ
-                await document.fonts.load(`12px "${fontDisplayFamily}"`, text);
-                await document.fonts.ready;
-
-                // 2. 【安全策】fetchを使わず、Canvasを介してパス（d属性）を擬似構築するアプローチ
-                // これによりCORSエラー（Failed to fetch）を200%回避します
-                msg.innerText = "SVGパスを出力中...";
+                // 🌟 CORSエラーを回避するためのGoogle Fonts CSS取得処理
+                // ユーザーエージェントを偽装できないブラウザ用に、全originsプロキシを安全に中継
+                const googleFontCssUrl = `https://googleapis.com{fontName.replace(/ /g, '+')}&text=${encodeURIComponent(text)}`;
+                const proxyCssUrl = `https://allorigins.win{encodeURIComponent(googleFontCssUrl)}`;
                 
-                // 文字数に応じた幅の計算
+                const cssResponse = await fetch(proxyCssUrl);
+                if (!cssResponse.ok) throw new Error("Google Fonts の情報を読み込めませんでした。フォント名が正しいか確認してください。");
+                const cssText = await cssResponse.text();
+
+                // CSSからフォントファイルの実際のURL（src: url(...)）を抜き出す
+                const fontUrlMatch = cssText.match(/url\((https:\/\/[^)]+)\)/);
+                if (!fontUrlMatch) {
+                    throw new Error(`Google Fonts に「${fontName}」が見つからないか、指定された文字に対応していません。`);
+                }
+                const actualFontUrl = fontUrlMatch[1].replace(/['"]/g, '');
+
+                msg.innerText = "フォントの幾何データをダウンロード中...";
+                
+                // 🌟 実際のフォントファイル（*.woff2 など）をプロキシ経由で安全にバイナリとして取得
+                const proxyFontUrl = `https://allorigins.win{encodeURIComponent(actualFontUrl)}`;
+                const fontResponse = await fetch(proxyFontUrl);
+                if (!fontResponse.ok) throw new Error("フォントバイナリの取得に失敗しました。");
+                const matchedFontData = await fontResponse.arrayBuffer();
+
+                msg.innerText = "ベクターパス（輪郭）を自動計算中...";
+
+                // opentype.js でフォントのバイナリを解析
+                const font = opentype.parse(matchedFontData);
+                
+                // パスの配置・サイズ計算
                 const fontSize = 72;
-                const estimatedWidth = text.length * fontSize * 0.9 + 60;
-                
-                // ブラウザの内蔵システムで文字の輪郭を取得できない場合の安全なSVGラッパー構築
-                const finalSvg = `<svg xmlns="http://w3.org" viewBox="0 0 ${estimatedWidth} 120" width="${estimatedWidth}" height="120">
-                    <style>
-                        @import url('https://googleapis.com{fontName}&text=${encodeURIComponent(text)}');
-                        .txt { font-family: "${fontDisplayFamily}", sans-serif; font-size: ${fontSize}px; fill: rgb(255, 87, 34); }
-                    </style>
-                    <text x="30" y="84" class="txt">${text}</text>
-                </svg>`;
+                const path = font.getPath(text, 0, 0, fontSize);
+                const box = path.getBoundingBox();
+                const w = Math.ceil(box.x2 - box.x1) + 60;
+                const h = Math.ceil(box.y2 - box.y1) + 60;
 
-                // 3. プレビュー用画像（DataURL）の構築
+                // 文字が枠内に綺麗に収まるように基準点を調整してSVGパス（d属性）を生成
+                const svgPath = font.getPath(text, 30 - box.x1, 30 - box.y1, fontSize).toSVG(5);
+                
+                // ✨ 完全にアウトライン化された純粋なSVGパスが完成！
+                const finalSvg = `<svg xmlns="http://w3.org" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><g fill="rgb(255, 87, 34)">${svgPath}</g></svg>`;
+
+                // プレビュー表示
                 const svgBase64 = btoa(unescape(encodeURIComponent(finalSvg)));
                 const svgDataUrl = `data:image/svg+xml;base64,${svgBase64}`;
-                
                 preview.innerHTML = `<img src="${svgDataUrl}" alt="SVG Preview">`;
 
-                // 4. ダウンロードボタンの設置
+                // ダウンロードボタン
                 const blob = new Blob([finalSvg], {type: "image/svg+xml"});
                 const blobUrl = URL.createObjectURL(blob);
-                
                 btnContainer.innerHTML = `<a href="${blobUrl}" download="${text}.svg" class="download-btn">SVGファイルをダウンロードする</a>`;
                 btnContainer.style.display = 'block';
 
                 loader.style.display = 'none';
-                msg.innerText = "✨ 処理完了！";
+                msg.innerText = "✨ パスの自動生成が完了しました！";
 
             } catch (e) {
                 loader.style.display = 'none';
@@ -113,6 +125,7 @@
                 errBox.style.display = 'block';
                 errBox.innerText = e.message;
                 preview.innerText = "エラーのためプレビューを表示できません。";
+                console.error(e);
             }
         }
         init();
