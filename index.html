@@ -64,47 +64,60 @@
                 const fontDisplayFamily = fontName.replace(/\+/g, ' ');
                 msg.innerText = `Google Fonts から「${fontDisplayFamily}」を画面に同期中...`;
 
-                // 1. 動的に@font-faceを生成してブラウザにフォントを読み込ませる（CORSエラーを完全に回避）
+                // 1. 動的に@font-faceを生成してブラウザにフォントを読み込ませる
                 const fontUrl = `https://googleapis.com{fontName.replace(/ /g, '+')}&text=${encodeURIComponent(text)}`;
                 const link = document.createElement('link');
                 link.rel = 'stylesheet';
                 link.href = fontUrl;
                 document.head.appendChild(link);
 
-                // ブラウザがフォントを認識してダウンロードし終えるのを待つ
-                await document.fonts.load(`12px "${fontDisplayFamily}"`, text);
-                await document.fonts.ready;
+                // 🌟【重要】無限フリーズ対策のタイムアウト（最大3秒待ってダメなら次へ進む）
+                await Promise.race([
+                    document.fonts.load(`12px "${fontDisplayFamily}"`, text),
+                    new Promise(resolve => setTimeout(resolve, 3000))
+                ]);
 
                 msg.innerText = "ブラウザのメモリからフォントバイナリを抽出中...";
 
                 // 2. ブラウザの内部メモリ（FontFace）から直接フォントファイルを取り出す
                 let matchedFontBuffer = null;
-                const loadedFonts = await document.fonts.ready;
-                for (let fontFace of loadedFonts) {
-                    // 読み込まれたフォント名が一致するかチェック
-                    if (fontFace.family.replace(/["']/g, '').toLowerCase() === fontDisplayFamily.toLowerCase()) {
-                        // ブラウザが保持しているフォントの生データを直接取得する（外部通信しないので100%安全）
-                        if (fontFace.blob) {
-                            matchedFontBuffer = await fontFace.blob.arrayBuffer();
-                        } else {
-                            // 一部の古い環境用の代替処理
-                            const res = await fetch(fontFace.src || fontFace.url);
-                            matchedFontBuffer = await res.arrayBuffer();
+                try {
+                    const loadedFonts = await document.fonts.ready;
+                    for (let fontFace of loadedFonts) {
+                        if (fontFace.family.replace(/["']/g, '').toLowerCase() === fontDisplayFamily.toLowerCase()) {
+                            if (fontFace.blob) {
+                                matchedFontBuffer = await fontFace.blob.arrayBuffer();
+                            }
+                            break;
                         }
-                        break;
+                    }
+                } catch (e) {
+                    console.log("メモリからの抽出をスキップします");
+                }
+
+                // 🌟 メモリから抜けなかった場合、AllOriginsプロキシ経由で直接データを引き抜く（バックアップ処理）
+                if (!matchedFontBuffer) {
+                    msg.innerText = "代替ルート（プロキシ経由）でパスを解析中...";
+                    
+                    // Google FontsのCSSをプロキシ経由で取得して、中の実際のフォントファイルURLを突き止める
+                    const proxyCssUrl = `https://allorigins.win{encodeURIComponent(fontUrl)}`;
+                    const cssRes = await fetch(proxyCssUrl).catch(() => null);
+                    if (cssRes && cssRes.ok) {
+                        const cssText = await cssRes.text();
+                        const fontUrlMatch = cssText.match(/url\((https:\/\/[^)]+)\)/);
+                        if (fontUrlMatch) {
+                            const actualFontUrl = fontUrlMatch[1].replace(/['"]/g, '');
+                            const proxyFontUrl = `https://allorigins.win{encodeURIComponent(actualFontUrl)}`;
+                            const fontRes = await fetch(proxyFontUrl).catch(() => null);
+                            if (fontRes && fontRes.ok) {
+                                matchedFontBuffer = await fontRes.arrayBuffer();
+                            }
+                        }
                     }
                 }
 
-                // もしブラウザから直接抜けなかった場合はフォント配信元から安全に直接fetch
                 if (!matchedFontBuffer) {
-                    msg.innerText = "プロキシ経由でパスを解析中...";
-                    const proxyUrl = `https://allorigins.win{encodeURIComponent(`https://gstatic.com{fontName.toLowerCase().replace(/ /g, '')}/v1/normal.ttf`)}`;
-                    const res = await fetch(proxyUrl).catch(() => null);
-                    if (res && res.ok) matchedFontBuffer = await res.arrayBuffer();
-                }
-
-                if (!matchedFontBuffer) {
-                    throw new Error("フォントの幾何学データの抽出に失敗しました。フォント名が正しいか確認してください。");
+                    throw new Error("フォントの幾何学データの抽出に失敗しました。フォント名が正しいか、または通信環境を確認してください。");
                 }
 
                 msg.innerText = "純粋なベクターパス（<path>）を自動生成中...";
@@ -119,11 +132,11 @@
                 const w = Math.ceil(box.x2 - box.x1) + 60;
                 const h = Math.ceil(box.y2 - box.y1) + 60;
 
-                // 基準点を整えて、完全にアウトライン化されたSVGパスを生成！
+                // 完全にアウトライン化されたSVGパスを生成
                 const svgPath = font.getPath(text, 30 - box.x1, 30 - box.y1, fontSize).toSVG(5);
                 
-                // 🌟 テキストタグやスタイルタグを一切使わない、純粋なパスのみのSVGが完成！
-                const finalSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><g fill="rgb(255, 87, 34)">${svgPath}</g></svg>`;
+                // 🌟 テキストタグやスタイルタグを一切使わない、純粋なパスのみのSVG
+                const finalSvg = `<svg xmlns="http://w3.org" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><g fill="rgb(255, 87, 34)">${svgPath}</g></svg>`;
 
                 // 4. プレビュー用画像（DataURL）の構築
                 const svgBase64 = btoa(unescape(encodeURIComponent(finalSvg)));
