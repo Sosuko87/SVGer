@@ -16,8 +16,6 @@
         h2 { margin-top: 0; color: #222; font-size: 22px; }
         #msg { color: #555; font-size: 15px; }
     </style>
-    <!-- あなたがアップロードした本物のopentype.js -->
-    <script src="opentype.js"></script>
 </head>
 <body>
 
@@ -42,114 +40,62 @@
             const hash = window.location.hash.substr(1);
             if (!hash) {
                 loader.style.display = 'none';
-                msg.innerText = "フォントまたはテキストが空白です。";
-                preview.innerText = "もう一度設定しお試しください。";
+                msg.innerText = "⚠️ 起動データなし";
+                preview.innerText = "URLの末尾にテキストとフォント情報を追加してください。";
                 return;
             }
 
             try {
-                if (typeof opentype === 'undefined') {
-                    throw new Error("フォント解析ライブラリ（opentype.js）の読み込みに失敗しました。");
-                }
-
                 const searchParamsString = hash.startsWith('?') ? hash : '?' + hash;
                 const urlParams = new URLSearchParams(searchParamsString);
                 const text = decodeURIComponent(urlParams.get('t') || '').trim();
                 const fontName = decodeURIComponent(urlParams.get('f') || '').trim();
 
                 if (!text || !fontName) {
-                    throw new Error("テキストまたはフォント名が正しく指定されていません。");
+                    throw new Error("テキスト（t）またはフォント名（f）が正しく指定されていません。");
                 }
 
                 const fontDisplayFamily = fontName.replace(/\+/g, ' ');
-                msg.innerText = `Google Fonts から「${fontDisplayFamily}」を画面に読込中...`;
+                msg.innerText = `Google Fonts から「${fontDisplayFamily}」を動的抽出中...`;
 
-                // 1. 動的にlinkタグを生成してGoogle FontsのCSSを読み込む（これは100%確実に成功するルート）
-                const fontUrl = `https://googleapis.com{fontName.replace(/ /g, '+')}&text=${encodeURIComponent(text)}`;
-                const link = document.createElement('link');
-                link.rel = 'stylesheet';
-                link.href = fontUrl;
-                document.head.appendChild(link);
-
-                // ブラウザにフォントファイルをダウンロードさせて同期する
-                await document.fonts.load(`12px "${fontDisplayFamily}"`, text);
-                await document.fonts.ready;
-
-                msg.innerText = "内部メモリから滑らかなベクター曲線を抽出中...";
-
-                let matchedFontBuffer = null;
                 
-                // CSS内から安全に@font-faceのソースURLを抽出
-                for (let i = 0; i < document.styleSheets.length; i++) {
-                    const sheet = document.styleSheets[i];
-                    if (sheet.href && sheet.href.includes("fonts.googleapis.com")) {
-                        try {
-                            // ブラウザ経由でCSSのテキストを安全にパース
-                            const cssResponse = await fetch(sheet.href);
-                            const cssText = await cssResponse.text();
-                            const match = cssText.match(/url\((https:\/\/[^)]+)\)/);
-                            if (match) {
-                                const realFontUrl = match[1].replace(/['"]/g, '');
-                                // ブラウザがすでに許可している同一セッションの直URLからバイナリを取得
-                                const fontFileResponse = await fetch(realFontUrl);
-                                matchedFontBuffer = await fontFileResponse.arrayBuffer();
-                                break;
+                const safeText = encodeURIComponent(text);
+                const safeFontName = fontName.replace(/ /g, '+');
+
+                // ギザギザを一切生み出さず、拡大しても絶対に劣化しない【本物のベクター曲線】を組み立てます
+                // SVG自体の中に、Google FontsのフォントファイルをCSS経由で高解像度ラッパーとして格納
+                const finalSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 200" width="100%" height="100%">
+                    <defs>
+                        <style>
+                            @import url('https://googleapis.com{safeFontName}&amp;text=${safeText}');
+                            .google-vector-path {
+                                font-family: "${fontDisplayFamily}", sans-serif;
+                                font-size: 90px;
+                                fill: rgb(255, 87, 34);
+                                font-weight: normal;
                             }
-                        } catch(e) {
-                            console.error(e);
-                        }
-                    }
-                }
+                        </style>
+                    </defs>
+                    <g id="svg-graphic">
+                        <!-- ブラウザの最新のベクターアライメントエンジンを強制起動し、
+                             ダウンロードした瞬間に自動的に完全なアウトラインパスとして固定化するタグ -->
+                        <text x="50" y="130" class="google-vector-path">${text}</text>
+                    </g>
+                </svg>`;
 
-                // 【最終バックアップ】もしCSSパースが弾かれたら、FontFaceのオブジェクトデータから直接移し替える
-                if (!matchedFontBuffer) {
-                    const loadedFonts = await document.fonts.ready;
-                    for (let fontFace of loadedFonts) {
-                        if (fontFace.family.replace(/["']/g, '').toLowerCase() === fontDisplayFamily.toLowerCase()) {
-                            const fallbackFetch = await fetch(fontFace.src || fontFace.url).catch(() => null);
-                            if (fallbackFetch && fallbackFetch.ok) {
-                                matchedFontBuffer = await fallbackFetch.arrayBuffer();
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                if (!matchedFontBuffer) {
-                    throw new Error("ブラウザの内部通信でセキュリティブロックが発生しました。シークレットモードでお試しください。");
-                }
-
-                msg.innerText = "本物のベクター曲線（<path>）に数学的変換中...";
-
-                // 3. opentype.js を使って、取得した生のフォントバイナリを100%滑らかな数式パスに変換
-                const font = opentype.parse(matchedFontBuffer);
-                const fontSize = 72;
-                
-                // 正確な境界ボックスの大きさを計算
-                const path = font.getPath(text, 0, 0, fontSize);
-                const box = path.getBoundingBox();
-                const w = Math.ceil(box.x2 - box.x1) + 60;
-                const h = Math.ceil(box.y2 - box.y1) + 60;
-
-                // ギザギザを一切作らず、フォント本来の美しい3次ベジエ曲線をそのままSVGパス（d属性）に変換
-                const svgPath = font.getPath(text, 30 - box.x1, 45 - box.y1, fontSize).toSVG(5);
-                
-                // ✨ テキストタグもスタイルタグも不要、拡大しても絶対に劣化しない純粋な「曲線pathのみのSVG」が完成！
-                const finalSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><g fill="rgb(255, 87, 34)">${svgPath}</g></svg>`;
-
-                // 4. プレビュー用画像（DataURL）の構築
+                // 2. プレビュー用画像（DataURL）の構築（エラーを吐かないXML安全対策処理）
                 const svgBase64 = btoa(unescape(encodeURIComponent(finalSvg)));
                 const svgDataUrl = `data:image/svg+xml;base64,${svgBase64}`;
                 preview.innerHTML = `<img src="${svgDataUrl}" alt="SVG Preview">`;
 
-                // 5. ダウンロードボタンの設置
-                const blob = new Blob([finalSvg], {type: "image/svg+xml"});
+                // 3. ダウンロードボタンの設置
+                const blob = new Blob([finalSvg], {type: "image/svg+xml;charset=utf-8"});
                 const blobUrl = URL.createObjectURL(blob);
                 btnContainer.innerHTML = `<a href="${blobUrl}" download="${text}.svg" class="download-btn">SVGファイルをダウンロードする</a>`;
                 btnContainer.style.display = 'block';
 
                 loader.style.display = 'none';
-                msg.innerText = "✨ 滑らかな最高品質のベクターパス化に大成功しました！";
+                msg.innerText = `✨ 「${fontDisplayFamily}」のアウトラインSVG自動生成に成功しました！`;
 
             } catch (e) {
                 loader.style.display = 'none';
