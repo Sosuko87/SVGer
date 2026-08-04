@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>SVG Path Generator (Google Fonts API Engine)</title>
+    <title>SVG Path Generator (Perfect Google Fonts Engine)</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; padding: 40px 20px; background: #00bcd4; color: white; }
         .card { background: white; color: #333; max-width: 650px; margin: 0 auto; padding: 30px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); }
@@ -60,26 +60,28 @@
                 const fontDisplayFamily = fontName.replace(/\+/g, ' ');
                 msg.innerText = "Google Fontsのメタデータを取得中...";
 
-                // 💡 【超安全対策】複雑な記号を使わず、文字列を「+」記号だけで確実に組み立てる方式にしました
-                const cssApiUrl = "https://googleapis.com" + encodeURIComponent(fontName) + ":wght@400&text=" + encodeURIComponent(text);
+                // 💡 【大解決】CORSエラーを完全に回避するため、オープンなリバースプロキシ（allorigins）を仲介させます
+                const googleApiUrl = "https://googleapis.com" + encodeURIComponent(fontName) + ":wght@400&text=" + encodeURIComponent(text);
+                const proxyUrl = "https://allorigins.win" + encodeURIComponent(googleApiUrl);
                 
-                // 1. Google Fonts CSS API から対象フォントの情報を取得
-                const response = await fetch(cssApiUrl);
+                // 1. プロキシ経由でGoogle FontsのCSSテキストを取得
+                const response = await fetch(proxyUrl);
                 if (!response.ok) {
-                    throw new Error("Google Fonts からフォント情報を取得できませんでした。フォント名「" + fontDisplayFamily + "」が正しいかご確認ください。");
+                    throw new Error("Google Fonts からフォント情報を取得できませんでした。");
                 }
-                const cssText = await response.text();
+                const proxyData = await response.json();
+                const cssText = proxyData.contents;
 
-                // 2. CSSの中から本物のフォントURL（gstatic.com）を抽出
+                // 2. CSSの中から本当のフォントファイルURL（src: url(...)）を切り出す
                 const urlMatch = cssText.match(/url\((https:\/\/fonts\.gstatic\.com\/[^)]+)\)/);
                 if (!urlMatch || !urlMatch[1]) {
-                    throw new Error("フォントファイル(URL)の抽出に失敗しました。一時的なネットワークエラーの可能性があります。");
+                    throw new Error("フォントURLの抽出に失敗しました。フォント名「" + fontDisplayFamily + "」がGoogle Fontsに存在するかご確認ください。");
                 }
                 const actualFontUrl = urlMatch[1];
 
                 msg.innerText = "「" + fontDisplayFamily + "」のフォントデータを解析中...";
 
-                // 3. 取得した本物のフォントURLから opentype.js を使ってロード
+                // 3. gstatic.comから直接opentype.jsでロード（ここはGoogle側がCORS全許可しているのでプロキシ不要です）
                 let font;
                 try {
                     font = await opentype.load(actualFontUrl);
@@ -95,7 +97,7 @@
                 const dData = glyphPath.toPathData(1);
 
                 if (!dData) {
-                    throw new Error("フォントのアウトライン抽出に失敗しました。入力テキストに対応する文字データがフォントに含まれていない可能性があります。");
+                    throw new Error("フォントのアウトライン抽出に失敗しました。");
                 }
 
                 // 余白とトリミングの自動計算
@@ -106,7 +108,7 @@
                 const width = (boundingBox.x2 - boundingBox.x1) + (pad * 2);
                 const height = (boundingBox.y2 - boundingBox.y1) + (pad * 2);
 
-                const finalSvg = '<svg xmlns="http://w3.org" viewBox="' + minX + ' ' + minY + ' ' + width + ' ' + height + '" width="' + width + '" height="' + height + '"><path fill="rgb(255, 87, 34)" fill-rule="evenodd" d="' + dData + '" /></svg>';
+                const finalSvg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="' + minX + ' ' + minY + ' ' + width + ' ' + height + '" width="' + width + '" height="' + height + '"><path fill="rgb(255, 87, 34)" fill-rule="evenodd" d="' + dData + '" /></svg>';
 
                 preview.innerHTML = finalSvg;
                 
