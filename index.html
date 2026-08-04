@@ -157,7 +157,7 @@
                 // 🌟 SVG自体のサイズも、広げたキャンバスに合わせて自動調節
                 const finalW = Math.ceil(textWidth * scale);
                 const finalH = Math.ceil(textHeight * scale);
-                const finalSvg = `<svg xmlns="http://w3.org" viewBox="0 0 ${finalW} ${finalH}" width="${finalW}" height="${finalH}"><path fill="rgb(255, 87, 34)" d="${dData}" /></svg>`;
+                const finalSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${finalW} ${finalH}" width="${finalW}" height="${finalH}"><path fill="rgb(255, 87, 34)" d="${dData}" /></svg>`;
 
                 // 3. プレビュー用画像（DataURL）の構築
                 const svgBase64 = btoa(unescape(encodeURIComponent(finalSvg)));
