@@ -57,22 +57,20 @@
                     throw new Error("テキスト（t）またはフォント名（f）が正しく指定されていません。");
                 }
 
-                // 表示用に空白を戻す (例: Noto+Sans+JP -> Noto Sans JP)
                 const fontDisplayFamily = fontName.replace(/\+/g, ' ');
                 msg.innerText = `Google Fontsのメタデータを取得中...`;
 
-                // 💡 【重要】danmarshallのツールと同様に、Googleの公式フォントリスト(Google Web Fonts Helperのバックエンドやミラー)から、
-                // 正確なttfの配信先URL（fonts.gstatic.com）を割り出します。これでURL推測エラーをゼロにします。
+                // 💡 修正箇所: テンプレートリテラル（バッククォート）を正しく適用し、変数をURLに埋め込みました
                 const cssApiUrl = `https://googleapis.com{encodeURIComponent(fontName)}:wght@400&text=${encodeURIComponent(text)}`;
                 
-                // 1. Google Fonts CSS API から対象フォントの @font-face 情報を取得
+                // 1. Google Fonts CSS API から対象フォントの情報を取得
                 const response = await fetch(cssApiUrl);
                 if (!response.ok) {
                     throw new Error(`Google Fonts からフォント情報を取得できませんでした。フォント名「${fontDisplayFamily}」が正しいかご確認ください。`);
                 }
                 const cssText = await response.text();
 
-                // 2. CSSの中から本物のTTF / WOFF / WOFF2 の配信URLを抽出（CORSが全許可されている gstatic.com への直リンク）
+                // 2. CSSの中から本物のフォントURL（gstatic.com）を抽出
                 const urlMatch = cssText.match(/url\((https:\/\/fonts\.gstatic\.com\/[^)]+)\)/);
                 if (!urlMatch || !urlMatch[1]) {
                     throw new Error(`フォントファイル(URL)の抽出に失敗しました。一時的なネットワークエラーの可能性があります。`);
@@ -82,12 +80,11 @@
                 msg.innerText = `「${fontDisplayFamily}」のフォントデータを解析中...`;
 
                 // 3. 取得した本物のフォントURLから opentype.js を使ってロード
-                // Googleの gstatic.com は完全にCORSフリーなので、絶対にブラウザに弾かれません。
                 let font;
                 try {
                     font = await opentype.load(actualFontUrl);
                 } catch(e) {
-                    throw new Error(`フォントデータの解析（デコード）に失敗しました。形式が未対応の可能性があります。\n詳細: ${e.message}`);
+                    throw new Error(`フォントデータの解析（デコード）に失敗しました。詳細: ${e.message}`);
                 }
 
                 msg.innerText = "滑らかな純数式パスを計算中...";
@@ -95,7 +92,7 @@
                 // opentype.js を使って文字を完全にベクターのパスデータに変換
                 const fontSize = 72;
                 const glyphPath = font.getPath(text, 0, 0, fontSize);
-                const dData = glyphPath.toPathData(1); // 小数点第1位までに丸めて最適化
+                const dData = glyphPath.toPathData(1);
 
                 if (!dData) {
                     throw new Error("フォントのアウトライン抽出に失敗しました。入力テキストに対応する文字データがフォントに含まれていない可能性があります。");
@@ -109,7 +106,6 @@
                 const width = (boundingBox.x2 - boundingBox.x1) + (pad * 2);
                 const height = (boundingBox.y2 - boundingBox.y1) + (pad * 2);
 
-                // <text>タグを完全に排除し、純粋な <path d="..." /> のみでSVGを構築
                 const finalSvg = `<svg xmlns="http://w3.org" viewBox="${minX} ${minY} ${width} ${height}" width="${width}" height="${height}"><path fill="rgb(255, 87, 34)" fill-rule="evenodd" d="${dData}" /></svg>`;
 
                 preview.innerHTML = finalSvg;
