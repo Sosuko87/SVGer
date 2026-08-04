@@ -97,7 +97,7 @@
                 const safeText = encodeURIComponent(text);
                 const safeFontName = fontName.replace(/ /g, '+');
 
-                const finalSvg = `<svg xmlns="http://w3.org" viewBox="0 0 ${textWidth} ${textHeight}" width="${textWidth}" height="${textHeight}">
+                const finalSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${textWidth} ${textHeight}" width="${textWidth}" height="${textHeight}">
                     <style>
                         @import url('https://googleapis.com{safeFontName}&amp;text=${safeText}');
                         .vector-path { font-family: "${fontDisplayFamily}", sans-serif; font-size: ${fontSize}px; fill: rgb(255, 87, 34); }
@@ -118,7 +118,7 @@
                 btnContainer.style.display = 'block';
 
                 loader.style.display = 'none';
-                msg.innerText = "✨ 純粋なSVGベクターパスの自動生成が完了しました！";
+                msg.innerText = "▼下のプレビューを確かめてからダウンロードしてください▼";
 
             } catch (e) {
                 loader.style.display = 'none';
