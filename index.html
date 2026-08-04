@@ -16,7 +16,7 @@
         h2 { margin-top: 0; color: #222; font-size: 22px; }
         #msg { color: #555; font-size: 15px; }
     </style>
-    <!-- 💡 ブラウザ上でPython環境を爆速で組み立てるPyodideスクリプト -->
+    <!-- 💡 Pyodideの読み込み先を最新の安定版(v0.26.4)に更新 -->
     <script src="https://jsdelivr.net"></script>
 </head>
 <body>
@@ -24,7 +24,7 @@
     <div class="card">
         <h2>SVGベクターパス・ジェネレーター</h2>
         <div id="loaderIcon" class="loader"></div>
-        <p id="msg">Python環境を起動しています（初回のみ約10秒かかります）...</p>
+        <p id="msg">Python環境を起動しています（初回のみ約5〜10秒かかります）...</p>
         
         <div id="preview">Pythonエンジンのロードを待っています...</div>
         <div id="btnContainer" style="display:none;"></div>
@@ -57,22 +57,22 @@
                     throw new Error("テキスト（t）またはフォント名（f）が正しく指定されていません。");
                 }
 
-                // 1. Pyodideを初期化して、ブラウザの中にミニPythonパソコンを作る
+                // 1. Pyodideを初期化してブラウザ内にPython環境を構築
                 let pyodide = await loadPyodide();
                 
-                msg.innerText = "Pythonのフォント解析ライブラリ(fonttools)をインストール中...";
-                // 2. Pythonの公式フォント操作モジュール「fonttools」をブラウザに直接インポート
+                msg.innerText = "Pythonのフォント解析ライブラリをセットアップ中...";
+                // 2. 自動インストール機能を確実に呼び出す
                 await pyodide.loadPackage("micropip");
                 const micropip = pyodide.pyimport("micropip");
                 await micropip.install("fonttools");
 
                 msg.innerText = "Google Fontsからデータを安全に抽出中...";
 
-                // 3. 先ほどの最強Pythonスクリプトを、ブラウザの変数と連動させて実行！
-                // JSのtextとfontNameをPython側に引き渡す
+                // JSの変数をPythonに引き渡す
                 pyodide.globals.set("text", text);
                 pyodide.globals.set("font_name", fontName);
 
+                // 3. 内部のPython処理スクリプトを実行
                 const pythonCode = `
 import urllib.request
 import urllib.parse
@@ -82,7 +82,6 @@ from fontTools.pens.svgPen import SVGPathPen
 from fontTools.pens.transformPen import TransformPen
 
 def run():
-    # CORSをすり抜けるUser-Agentを設定して、安全にCSSを取得
     encoded_text = urllib.parse.quote(text)
     css_url = f"https://googleapis.com{font_name.replace(' ', '+')}&text={encoded_text}"
     req = urllib.request.Request(css_url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -90,9 +89,8 @@ def run():
     with urllib.request.urlopen(req) as response:
         css_text = response.read().decode('utf-8')
         
-    font_url = css_text.split("url(")[1].split(")")[0]
+    font_url = css_text.split("url(").split(")")
     
-    # フォントファイルを仮想環境にダウンロード
     font_req = urllib.request.Request(font_url, headers={'User-Agent': 'Mozilla/5.0'})
     with urllib.request.urlopen(font_req) as response:
         font_data = response.read()
@@ -100,7 +98,6 @@ def run():
     with open("temp_font.ttf", "wb") as f:
         f.write(font_data)
         
-    # fonttoolsモジュールをぶん回して、数式データをミリ単位で抽出
     font = TTFont("temp_font.ttf")
     glyph_set = font.getGlyphSet()
     cmap = font.getBestCmap()
@@ -115,7 +112,6 @@ def run():
         glyph = glyph_set[glyph_name]
         
         svg_pen = SVGPathPen(glyph_set)
-        # 上下反転（Y軸調整）と文字の並び替え
         transform_pen = TransformPen(svg_pen, (1, 0, 0, -1, current_x, 0))
         glyph.draw(transform_pen)
         
@@ -125,7 +121,6 @@ def run():
     head_table = font['head']
     units_per_em = head_table.unitsPerEm
     
-    # 完全にくり抜かれたSVGを構築してJSに返す
     return json.dumps({
         "d": combined_d.strip(),
         "viewBox": f"0 {-units_per_em} {current_x} {units_per_em}",
@@ -136,14 +131,12 @@ def run():
 run()
 `;
 
-                // Pythonコードを実行して結果のJSONを受け取る
                 const pyResultJson = await pyodide.runPythonAsync(pythonCode);
                 const result = JSON.parse(pyResultJson);
 
                 if (!result.d) throw new Error("フォントのアウトライン抽出に失敗しました。");
 
-                // 4. 受け取ったPythonの超高精度データからSVGタグを出力
-                const finalSvg = `<svg xmlns="http://w3.org" viewBox="${result.viewBox}" width="${result.w}" height="${result.h}"><path fill="rgb(255, 87, 34)" d="${result.d}" /></svg>`;
+                const finalSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${result.viewBox}" width="${result.w}" height="${result.h}"><path fill="rgb(255, 87, 34)" d="${result.d}" /></svg>`;
 
                 preview.innerHTML = finalSvg;
                 
