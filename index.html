@@ -58,33 +58,33 @@
                 }
 
                 const fontDisplayFamily = fontName.replace(/\+/g, ' ');
-                msg.innerText = `Google Fontsのメタデータを取得中...`;
+                msg.innerText = "Google Fontsのメタデータを取得中...";
 
-                // 💡 修正箇所: テンプレートリテラル（バッククォート）を正しく適用し、変数をURLに埋め込みました
-                const cssApiUrl = `https://googleapis.com{encodeURIComponent(fontName)}:wght@400&text=${encodeURIComponent(text)}`;
+                // 💡 【超安全対策】複雑な記号を使わず、文字列を「+」記号だけで確実に組み立てる方式にしました
+                const cssApiUrl = "https://googleapis.com" + encodeURIComponent(fontName) + ":wght@400&text=" + encodeURIComponent(text);
                 
                 // 1. Google Fonts CSS API から対象フォントの情報を取得
                 const response = await fetch(cssApiUrl);
                 if (!response.ok) {
-                    throw new Error(`Google Fonts からフォント情報を取得できませんでした。フォント名「${fontDisplayFamily}」が正しいかご確認ください。`);
+                    throw new Error("Google Fonts からフォント情報を取得できませんでした。フォント名「" + fontDisplayFamily + "」が正しいかご確認ください。");
                 }
                 const cssText = await response.text();
 
                 // 2. CSSの中から本物のフォントURL（gstatic.com）を抽出
                 const urlMatch = cssText.match(/url\((https:\/\/fonts\.gstatic\.com\/[^)]+)\)/);
                 if (!urlMatch || !urlMatch[1]) {
-                    throw new Error(`フォントファイル(URL)の抽出に失敗しました。一時的なネットワークエラーの可能性があります。`);
+                    throw new Error("フォントファイル(URL)の抽出に失敗しました。一時的なネットワークエラーの可能性があります。");
                 }
                 const actualFontUrl = urlMatch[1];
 
-                msg.innerText = `「${fontDisplayFamily}」のフォントデータを解析中...`;
+                msg.innerText = "「" + fontDisplayFamily + "」のフォントデータを解析中...";
 
                 // 3. 取得した本物のフォントURLから opentype.js を使ってロード
                 let font;
                 try {
                     font = await opentype.load(actualFontUrl);
                 } catch(e) {
-                    throw new Error(`フォントデータの解析（デコード）に失敗しました。詳細: ${e.message}`);
+                    throw new Error("フォントデータの解析（デコード）に失敗しました。詳細: " + e.message);
                 }
 
                 msg.innerText = "滑らかな純数式パスを計算中...";
@@ -106,14 +106,14 @@
                 const width = (boundingBox.x2 - boundingBox.x1) + (pad * 2);
                 const height = (boundingBox.y2 - boundingBox.y1) + (pad * 2);
 
-                const finalSvg = `<svg xmlns="http://w3.org" viewBox="${minX} ${minY} ${width} ${height}" width="${width}" height="${height}"><path fill="rgb(255, 87, 34)" fill-rule="evenodd" d="${dData}" /></svg>`;
+                const finalSvg = '<svg xmlns="http://w3.org" viewBox="' + minX + ' ' + minY + ' ' + width + ' ' + height + '" width="' + width + '" height="' + height + '"><path fill="rgb(255, 87, 34)" fill-rule="evenodd" d="' + dData + '" /></svg>';
 
                 preview.innerHTML = finalSvg;
                 
                 const blob = new Blob([finalSvg], { type: 'image/svg+xml' });
                 const blobUrl = URL.createObjectURL(blob);
 
-                btnContainer.innerHTML = `<a href="${blobUrl}" download="generated.svg" class="download-btn">純ベクターSVGをダウンロード</a>`;
+                btnContainer.innerHTML = '<a href="' + blobUrl + '" download="generated.svg" class="download-btn">純ベクターSVGをダウンロード</a>';
                 btnContainer.style.display = 'block';
                 loader.style.display = 'none';
                 msg.innerText = "✨ `<text>`なしの100%完璧なベクターSVGが完成しました！";
@@ -122,7 +122,7 @@
                 console.error(error);
                 loader.style.display = 'none';
                 msg.innerText = "❌ エラーが発生しました";
-                errBox.innerText = `原因: ${error.message}\n\nURLパラメータ（例: f=Roboto や f=Poppins、日本語なら f=Noto+Sans+JP）のスペルをご確認ください。`;
+                errBox.innerText = "原因: " + error.message + "\n\nURLパラメータ（例: f=Roboto や f=Poppins、日本語なら f=Noto+Sans+JP）のスペルをご確認ください。";
                 errBox.style.display = 'block';
             }
         }
