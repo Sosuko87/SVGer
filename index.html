@@ -2,11 +2,11 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>SVG Path Generator</title>
+    <title>SVG Path Generator (Perfect & Smooth)</title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; padding: 40px 20px; background: #f55722; color: white; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; padding: 40px 20px; background: #00bcd4; color: white; }
         .card { background: white; color: #333; max-width: 650px; margin: 0 auto; padding: 30px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); }
-        .loader { border: 6px solid #f3f3f3; border-top: 6px solid #f55722; border-radius: 50%; width: 45px; height: 45px; animation: spin 1s linear infinite; margin: 20px auto; }
+        .loader { border: 6px solid #f3f3f3; border-top: 6px solid #00bcd4; border-radius: 50%; width: 45px; height: 45px; animation: spin 1s linear infinite; margin: 20px auto; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         #preview { margin: 25px 0; border: 2px dashed #ddd; padding: 20px; background: #fafafa; border-radius: 8px; min-height: 60px; display: flex; align-items: center; justify-content: center; }
         #preview svg { max-width: 100%; height: auto; display: block; }
@@ -16,7 +16,7 @@
         h2 { margin-top: 0; color: #222; font-size: 22px; }
         #msg { color: #555; font-size: 15px; }
     </style>
-    <!-- 高精度にフォントのアウトラインを抽出するライブラリ -->
+    <!-- opentype.jsライブラリ（カクカクしない最高品質のパス抽出用） -->
     <script src="https://cloudflare.com"></script>
 </head>
 <body>
@@ -57,46 +57,44 @@
                     throw new Error("テキスト（t）またはフォント名（f）が正しく指定されていません。");
                 }
 
+                // フォント名をフォーマット（例: "Noto Sans JP" -> "notosansjp", "Roboto" -> "roboto"）
                 const fontDisplayFamily = fontName.replace(/\+/g, ' ');
-                msg.innerText = `Google Fonts から「${fontDisplayFamily}」を解析中...`;
+                const cleanFontName = fontName.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-                // 1. Google Fonts から直接フォントファイル(ttf/woff)のURLを取得する
-                const cssUrl = `https://googleapis.com{fontName.replace(/ /g, '+')}&text=${encodeURIComponent(text)}`;
-                const cssResponse = await fetch(cssUrl);
-                if (!cssResponse.ok) throw new Error("Google Fonts のCSS取得に失敗しました。");
-                const cssText = await cssResponse.text();
+                msg.innerText = `Google Fonts から「${fontDisplayFamily}」を直接解析中...`;
+
+                // 💡 【裏技】Google FontsのオープンソースCDNリポジトリから、直接ttf/woff2ファイルを読み込む
+                // これにより、CORSエラーを完全に回避しながらopentype.jsにフォントを渡せます
+                const directFontUrl = `https://jsdelivr.net{cleanFontName}/${fontName.replace(/ /g, '')}-Regular.ttf`;
                 
-                // CSS内から fontファイル（src: url(...)）の実際のURLを抽出
-                const fontUrlMatch = cssText.match(/url\((https:\/\/[^)]+)\)/);
-                if (!fontUrlMatch) throw new Error("フォントファイルのURL抽出に失敗しました。");
-                const actualFontUrl = fontUrlMatch[1];
-
-                // 2. opentype.js を使ってフォントデータをパース
-                const font = await opentype.load(actualFontUrl);
-                
-                msg.innerText = "美しいベクターパスを計算中...";
-
-                // 3. パスデータの生成（フォントサイズ 72px）
-                const fontSize = 72;
-                const glyphPath = font.getPath(text, 0, 0, fontSize);
-                const dData = glyphPath.toPathData(1); // 小数点第1位まで四捨五入
-
-                if (!dData) {
-                    throw new Error("フォントのアウトライン抽出に失敗しました。");
+                let font;
+                try {
+                    font = await opentype.load(directFontUrl);
+                } catch (e) {
+                    // もし「-Regular.ttf」で見つからない特殊なフォント用のフォールバック
+                    const fallbackUrl = `https://jsdelivr.net{cleanFontName}/${fontName.replace(/ /g, '')}[wght].ttf`;
+                    font = await opentype.load(fallbackUrl);
                 }
 
-                // 4. バウンディングボックス（文字の正確な幅と高さ）を計算してぴったりフィットさせる
+                msg.innerText = "滑らかな数式パスを計算中...";
+
+                const fontSize = 72;
+                const glyphPath = font.getPath(text, 0, 0, fontSize);
+                const dData = glyphPath.toPathData(1); // 小数点第1位に丸めて容量削減
+
+                if (!dData) throw new Error("フォントのアウトライン抽出に失敗しました。");
+
+                // 文字盤の大きさに合わせた自動トリミング（余白の自動計算）
                 const boundingBox = glyphPath.getBoundingBox();
-                const pad = 10; // 僅かな余白
+                const pad = 10;
                 const minX = boundingBox.x1 - pad;
                 const minY = boundingBox.y1 - pad;
                 const width = (boundingBox.x2 - boundingBox.x1) + (pad * 2);
                 const height = (boundingBox.y2 - boundingBox.y1) + (pad * 2);
 
-                // SVGの組み立て
+                // くり抜き処理(fill-rule="evenodd")に対応した美しいSVGを生成
                 const finalSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} ${minY} ${width} ${height}" width="${width}" height="${height}"><path fill="rgb(255, 87, 34)" fill-rule="evenodd" d="${dData}" /></svg>`;
 
-                // 5. 画面描画とダウンロードボタンの設置
                 preview.innerHTML = finalSvg;
                 
                 const blob = new Blob([finalSvg], { type: 'image/svg+xml' });
@@ -104,19 +102,17 @@
 
                 btnContainer.innerHTML = `<a href="${blobUrl}" download="generated.svg" class="download-btn">SVGをダウンロード</a>`;
                 btnContainer.style.display = 'block';
-                
                 loader.style.display = 'none';
-                msg.innerText = "✨ SVGパスの生成が完了しました！";
+                msg.innerText = "✨ 滑らかなSVGパスの生成が完了しました！";
 
             } catch (error) {
                 console.error(error);
                 loader.style.display = 'none';
                 msg.innerText = "❌ エラーが発生しました";
-                errBox.innerText = error.message;
+                errBox.innerText = "フォントファイルの読み込み、またはパスの抽出に失敗しました。フォント名が正しいかご確認ください。";
                 errBox.style.display = 'block';
             }
         }
-
         window.addEventListener('DOMContentLoaded', init);
     </script>
 </body>
