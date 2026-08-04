@@ -9,13 +9,15 @@
         .loader { border: 6px solid #f3f3f3; border-top: 6px solid #f55722; border-radius: 50%; width: 45px; height: 45px; animation: spin 1s linear infinite; margin: 20px auto; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         #preview { margin: 25px 0; border: 2px dashed #ddd; padding: 20px; background: #fafafa; border-radius: 8px; min-height: 60px; display: flex; align-items: center; justify-content: center; }
-        #preview img { max-width: 100%; height: auto; }
+        #preview svg { max-width: 100%; height: auto; display: block; }
         .download-btn { background: #28a745; color: white; border: none; padding: 14px 28px; font-size: 16px; font-weight: bold; border-radius: 8px; cursor: pointer; text-decoration: none; display: inline-block; transition: background 0.2s; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
         .download-btn:hover { background: #218838; }
         .error-box { background: #ffe3e3; color: #d63031; padding: 15px; border-radius: 8px; display: none; text-align: left; font-family: monospace; font-size: 13px; border-left: 5px solid #d63031; margin-top: 20px; }
         h2 { margin-top: 0; color: #222; font-size: 22px; }
         #msg { color: #555; font-size: 15px; }
     </style>
+    <!-- 高精度にフォントのアウトラインを抽出するライブラリ -->
+    <script src="https://cloudflare.com"></script>
 </head>
 <body>
 
@@ -41,7 +43,7 @@
             if (!hash) {
                 loader.style.display = 'none';
                 msg.innerText = "⚠️ 起動データなし";
-                preview.innerText = "URLの末尾にテキストとフォント情報を追加してください。";
+                preview.innerText = "URLの末尾に「#t=テキスト&f=フォント名」を追加してください。";
                 return;
             }
 
@@ -56,133 +58,66 @@
                 }
 
                 const fontDisplayFamily = fontName.replace(/\+/g, ' ');
-                msg.innerText = `Google Fonts から「${fontDisplayFamily}」を同期中...`;
+                msg.innerText = `Google Fonts から「${fontDisplayFamily}」を解析中...`;
 
-                // 1. 動的にlinkタグを生成してGoogle FontsのCSSをインポート
-                const fontUrl = `https://googleapis.com{fontName.replace(/ /g, '+')}&text=${encodeURIComponent(text)}`;
-                const link = document.createElement('link');
-                link.rel = 'stylesheet';
-                link.href = fontUrl;
-                document.head.appendChild(link);
-
-                // フォントファイルのダウンロードを確実に待つ
-                await document.fonts.load(`72px "${fontDisplayFamily}"`, text);
-                await document.fonts.ready;
-
-                msg.innerText = "インポートしたフォントから滑らかな数式パスを計算中...";
-
-                // 2. 仮想Canvasを生成して、指定フォントの形状（アウトライン）を動的に抽出
-                const fontSize = 120; 
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
-                ctx.font = `${fontSize}px "${fontDisplayFamily}", sans-serif`;
+                // 1. Google Fonts から直接フォントファイル(ttf/woff)のURLを取得する
+                const cssUrl = `https://googleapis.com{fontName.replace(/ /g, '+')}&text=${encodeURIComponent(text)}`;
+                const cssResponse = await fetch(cssUrl);
+                if (!cssResponse.ok) throw new Error("Google Fonts のCSS取得に失敗しました。");
+                const cssText = await cssResponse.text();
                 
-                // 🌟 はみ出し対策：文字幅の計測に十分な余白（+100px）を確保
-                const metrics = ctx.measureText(text);
-                const textWidth = Math.ceil(metrics.width) + 100;
-                const textHeight = fontSize + 100;
-                canvas.width = textWidth;
-                canvas.height = textHeight;
+                // CSS内から fontファイル（src: url(...)）の実際のURLを抽出
+                const fontUrlMatch = cssText.match(/url\((https:\/\/[^)]+)\)/);
+                if (!fontUrlMatch) throw new Error("フォントファイルのURL抽出に失敗しました。");
+                const actualFontUrl = fontUrlMatch[1];
 
-                // 🌟 はみ出し対策：文字をキャンバスの端ではなく、安全な内側（X=50, Y=40）に配置
-                ctx.font = `${fontSize}px "${fontDisplayFamily}", sans-serif`;
-                ctx.textBaseline = "top";
-                ctx.fillStyle = "black";
-                ctx.fillText(text, 50, 40);
-
-                const imgData = ctx.getImageData(0, 0, textWidth, textHeight);
-                const pixels = imgData.data;
-
-                let dData = "";
-                let bitmask = [];
-                for (let y = 0; y < textHeight; y++) {
-                    bitmask[y] = [];
-                    for (let x = 0; x < textWidth; x++) {
-                        bitmask[y][x] = pixels[(y * textWidth + x) * 4 + 3] > 128 ? 1 : 0;
-                    }
-                }
-
-                // 縮尺率の設定
-                const scale = 0.6;
-
-                // 等高線追跡アルゴリズムによる正確な輪郭線（数式データ）の構築
-                const pointsToPath = (points) => {
-                    if (points.length === 0) return "";
-                    let d = `M ${(points[0].x * scale).toFixed(1)} ${(points[0].y * scale).toFixed(1)}`;
-                    for (let i = 1; i < points.length; i++) {
-                        d += ` L ${(points[i].x * scale).toFixed(1)} ${(points[i].y * scale).toFixed(1)}`;
-                    }
-                    d += " Z";
-                    return d;
-                };
-
-                let visited = [];
-                for (let y = 0; y < textHeight; y++) visited[y] = [];
+                // 2. opentype.js を使ってフォントデータをパース
+                const font = await opentype.load(actualFontUrl);
                 
-                for (let y = 1; y < textHeight - 1; y++) {
-                    for (let x = 1; x < textWidth - 1; x++) {
-                        if (bitmask[y][x] && !visited[y][x] && (!bitmask[y-1][x] || !bitmask[y+1][x] || !bitmask[y][x-1] || !bitmask[y][x+1])) {
-                            let contour = [];
-                            let cx = x, cy = y;
-                            
-                            do {
-                                contour.push({x: cx, y: cy});
-                                visited[cy][cx] = true;
-                                
-                                let foundNext = false;
-                                const dirs = [{x:1,y:0}, {x:0,y:1}, {x:-1,y:0}, {x:0,y:-1}, {x:1,y:1}, {x:-1,y:1}, {x:-1,y:-1}, {x:1,y:-1}];
-                                for (let d of dirs) {
-                                    let nx = cx + d.x, ny = cy + d.y;
-                                    if (bitmask[ny] && bitmask[ny][nx] && !visited[ny][nx] && 
-                                        (!bitmask[ny-1][nx] || !bitmask[ny+1][nx] || !bitmask[ny][nx-1] || !bitmask[ny][nx+1])) {
-                                        cx = nx; cy = ny;
-                                        foundNext = true;
-                                        break;
-                                    }
-                                }
-                                if (!foundNext) break;
-                            } while (cx !== x || cy !== y);
-                            
-                            if (contour.length > 3) {
-                                dData += " " + pointsToPath(contour);
-                            }
-                        }
-                    }
-                }
+                msg.innerText = "美しいベクターパスを計算中...";
+
+                // 3. パスデータの生成（フォントサイズ 72px）
+                const fontSize = 72;
+                const glyphPath = font.getPath(text, 0, 0, fontSize);
+                const dData = glyphPath.toPathData(1); // 小数点第1位まで四捨五入
 
                 if (!dData) {
-                    throw new Error("フォントのアウトライン抽出に失敗しました。再読み込みしてください。");
+                    throw new Error("フォントのアウトライン抽出に失敗しました。");
                 }
 
-                // 🌟 SVG自体のサイズも、広げたキャンバスに合わせて自動調節
-                const finalW = Math.ceil(textWidth * scale);
-                const finalH = Math.ceil(textHeight * scale);
-                const finalSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${finalW} ${finalH}" width="${finalW}" height="${finalH}"><path fill="rgb(255, 87, 34)" d="${dData}" /></svg>`;
+                // 4. バウンディングボックス（文字の正確な幅と高さ）を計算してぴったりフィットさせる
+                const boundingBox = glyphPath.getBoundingBox();
+                const pad = 10; // 僅かな余白
+                const minX = boundingBox.x1 - pad;
+                const minY = boundingBox.y1 - pad;
+                const width = (boundingBox.x2 - boundingBox.x1) + (pad * 2);
+                const height = (boundingBox.y2 - boundingBox.y1) + (pad * 2);
 
-                // 3. プレビュー用画像（DataURL）の構築
-                const svgBase64 = btoa(unescape(encodeURIComponent(finalSvg)));
-                const svgDataUrl = `data:image/svg+xml;base64,${svgBase64}`;
-                preview.innerHTML = `<img src="${svgDataUrl}" alt="SVG Preview">`;
+                // SVGの組み立て
+                const finalSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} ${minY} ${width} ${height}" width="${width}" height="${height}"><path fill="rgb(255, 87, 34)" fill-rule="evenodd" d="${dData}" /></svg>`;
 
-                // 4. ダウンロードボタンの設置
-                const blob = new Blob([finalSvg], {type: "image/svg+xml"});
+                // 5. 画面描画とダウンロードボタンの設置
+                preview.innerHTML = finalSvg;
+                
+                const blob = new Blob([finalSvg], { type: 'image/svg+xml' });
                 const blobUrl = URL.createObjectURL(blob);
-                btnContainer.innerHTML = `<a href="${blobUrl}" download="${text}.svg" class="download-btn">SVGファイルをダウンロードする</a>`;
+
+                btnContainer.innerHTML = `<a href="${blobUrl}" download="generated.svg" class="download-btn">SVGをダウンロード</a>`;
                 btnContainer.style.display = 'block';
-
+                
                 loader.style.display = 'none';
-                msg.innerText = "✨ 文字が綺麗に収まった純粋な数式パスが完成しました！";
+                msg.innerText = "✨ SVGパスの生成が完了しました！";
 
-            } catch (e) {
+            } catch (error) {
+                console.error(error);
                 loader.style.display = 'none';
-                msg.innerText = "❌ 処理に失敗しました";
+                msg.innerText = "❌ エラーが発生しました";
+                errBox.innerText = error.message;
                 errBox.style.display = 'block';
-                errBox.innerText = e.message;
-                preview.innerText = "エラーのためプレビューを表示できません。";
-                console.error(e);
             }
         }
-        init();
+
+        window.addEventListener('DOMContentLoaded', init);
     </script>
 </body>
 </html>
