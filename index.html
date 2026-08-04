@@ -93,7 +93,7 @@
 
                 // 🌟 純粋なSVGパス（<path d="..." />）として機能させるために、
                 // 指定されたGoogle Fontが適用されたテキスト要素をインラインで包み込んだクリーンなSVGパスデータを構築
-                const finalSvg = `<svg xmlns="http://w3.org" viewBox="0 0 ${textWidth} ${textHeight}" width="${textWidth}" height="${textHeight}">
+                const finalSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${textWidth} ${textHeight}" width="${textWidth}" height="${textHeight}">
                     <style>
                         @import url('https://googleapis.com{fontName.replace(/ /g, '+')}&text=${encodeURIComponent(text)}');
                         .vector-path { font-family: "${fontDisplayFamily}", sans-serif; font-size: ${fontSize}px; fill: rgb(255, 87, 34); }
