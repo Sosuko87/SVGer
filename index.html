@@ -93,14 +93,18 @@
 
                 // 🌟 純粋なSVGパス（<path d="..." />）として機能させるために、
                 // 指定されたGoogle Fontが適用されたテキスト要素をインラインで包み込んだクリーンなSVGパスデータを構築
-                const finalSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${textWidth} ${textHeight}" width="${textWidth}" height="${textHeight}">
+// 🌟 正しく修正された新しいSVG生成コード
+                const safeText = encodeURIComponent(text);
+                const safeFontName = fontName.replace(/ /g, '+');
+
+                const finalSvg = `<svg xmlns="http://w3.org" viewBox="0 0 ${textWidth} ${textHeight}" width="${textWidth}" height="${textHeight}">
                     <style>
-                        @import url('https://googleapis.com{fontName.replace(/ /g, '+')}&text=${encodeURIComponent(text)}');
+                        @import url('https://googleapis.com{safeFontName}&amp;text=${safeText}');
                         .vector-path { font-family: "${fontDisplayFamily}", sans-serif; font-size: ${fontSize}px; fill: rgb(255, 87, 34); }
                     </style>
-                    <!-- 完全にベクターアライメントされたテキストパス出力 -->
                     <text x="30" y="84" class="vector-path">${text}</text>
                 </svg>`;
+
 
                 // 3. プレビュー用画像（DataURL）の構築
                 const svgBase64 = btoa(unescape(encodeURIComponent(finalSvg)));
