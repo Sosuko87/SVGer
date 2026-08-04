@@ -128,7 +128,7 @@
                 const svgPath = font.getPath(text, 30 - box.x1, 45 - box.y1, fontSize).toSVG(5);
                 
                 // ✨ テキストタグもスタイルタグも不要、拡大しても絶対に劣化しない純粋な「曲線SVG」が完成！
-                const finalSvg = `<svg xmlns="http://w3.org" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><g fill="rgb(255, 87, 34)">${svgPath}</g></svg>`;
+                const finalSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><g fill="rgb(255, 87, 34)">${svgPath}</g></svg>`;
 
                 // 4. プレビュー用画像（DataURL）の構築
                 const svgBase64 = btoa(unescape(encodeURIComponent(finalSvg)));
