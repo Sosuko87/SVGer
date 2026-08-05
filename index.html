@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <title>SVGベクターパス・ジェネレーター</title>
-    <!-- 依存関係はopentype.jsのみ。クラッシュを防ぐため軽量・安全に設計 -->
-    <script src="https://jsdelivr.net"></script>
+    <!-- 修正ポイント：学校のネットでもブロックされないよう、自分のGitHub内のファイルを読み込みます -->
+    <script src="./opentype.min.js"></script>
     <style>
         body { font-family: sans-serif; background-color: #00bcd4; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
         .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); width: 100%; max-width: 600px; text-align: center; }
@@ -39,17 +39,15 @@
     </div>
 
     <script>
-        // 1. URLのハッシュ（#t=abc&f=Font+Name）からパラメータを解析
         function getUrlParams() {
             const hash = window.location.hash.substring(1);
             const params = new URLSearchParams(hash);
             return {
-                text: params.get('t') || 'abc', // 文字列（無ければデフォルト 'abc'）
-                font: params.get('f') || 'Noto Sans JP' // フォント名
+                text: params.get('t') || 'abc',
+                font: params.get('f') || 'Noto Sans JP'
             };
         }
 
-        // 2. メイン処理
         async function initGenerator() {
             const errorBox = document.getElementById('errorBox');
             const errorDetails = document.getElementById('errorDetails');
@@ -57,60 +55,55 @@
             const svgPreview = document.getElementById('svgPreview');
             const outputArea = document.getElementById('outputArea');
 
-            // 表示の初期化
             errorBox.style.display = 'none';
             statusText.style.display = 'block';
             svgPreview.style.display = 'none';
             outputArea.style.display = 'none';
+
+            // 万が一 opentype.js 自体が読み込めなかった場合の安全ガード
+            if (typeof opentype === 'undefined') {
+                showError("ライブラリの読み込みエラー", "opentype.min.js ファイルが正しく配置されているか確認してください。");
+                return;
+            }
 
             const { text, font } = getUrlParams();
 
             try {
                 statusText.innerText = `フォント「${font}」を処理中...`;
 
-                // 3. ページクラッシュとCORSエラーを完全に防ぐための安全な配信ルート
-                // ユーザーが入力したフォント名に応じて、CORSが全開放されている生フォントファイル(.ttf/.woff2)を直接ロードします
                 let directFontUrl = '';
                 const lowerFont = font.toLowerCase().replace(/\s+/g, '');
 
                 if (lowerFont === 'notosansjp') {
-                    // Noto Sans JP の直接ダウンロード用Gstaticアドレス
                     directFontUrl = 'https://gstatic.com';
                 } else if (lowerFont === 'lineseedjp') {
-                    // LINE Seed JP が指定された場合の直接アドレス
                     directFontUrl = 'https://gstatic.com';
                 } else {
-                    // その他のフォントは標準のRoboto（軽量・高速）をフォールバックとして安全に読み込みます
                     directFontUrl = 'https://gstatic.com';
                 }
 
-                // 4. opentype.js を使って、取得したフォントをメモリ上で解析・パス化
                 opentype.load(directFontUrl, function(err, loadedFont) {
                     if (err) {
-                        showError("フォントデータの解析に失敗しました。", "指定されたフォントURLの読み込み中に、一時的な通信エラーが発生しました。");
+                        showError("フォントデータの解析に失敗しました。", "Googleフォントへの通信が制限されている可能性があります。");
                         return;
                     }
 
-                    // パスデータの生成 (文字, 開始X, 開始Y, フォントサイズ)
                     const fontSize = 50;
                     const path = loadedFont.getPath(text, 10, 55, fontSize);
-                    const svgPathData = path.toPathData(1); // 小数点1桁に丸めてコードを軽量化
+                    const svgPathData = path.toPathData(1);
 
                     if (!svgPathData || svgPathData.trim() === "") {
-                        showError("SVGパスの生成結果が空です。", "入力された文字データがフォントに含まれていない可能性があります。");
+                        showError("SVGパスの生成結果が空です。", "入力された文字データがフォントに含まれていません。");
                         return;
                     }
 
-                    // 画面の表示を正常に更新
                     statusText.style.display = 'none';
                     svgPreview.style.display = 'block';
                     outputArea.style.display = 'block';
 
-                    // 文字の幅に合わせてビューボックスの横幅を自動フィッティング
                     const textWidth = loadedFont.getAdvanceWidth(text, fontSize);
                     svgPreview.setAttribute('viewBox', `0 0 ${textWidth + 20} 80`);
 
-                    // パスとテキストエリアに反映
                     document.getElementById('svgPath').setAttribute('d', svgPathData);
                     document.getElementById('codeOutput').value = `<path d="${svgPathData}" fill="#333" />`;
                 });
@@ -126,7 +119,6 @@
             document.getElementById('errorDetails').innerHTML = `<strong>${title}</strong><br><span style="color:#666; font-size:12px;">${detail}</span>`;
         }
 
-        // ページ読み込み時と、URLのハッシュ（#以降）が変更されたら即座に実行
         window.addEventListener('load', initGenerator);
         window.addEventListener('hashchange', initGenerator);
     </script>
