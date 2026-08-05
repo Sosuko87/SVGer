@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <title>SVGベクターパス・ジェネレーター</title>
+    <!-- 🌟 なめらかなベジエ曲線に自動トレースしてくれる軽量ライブラリを読み込み -->
+    <script src="https://jsdelivr.net"></script>
     <style>
         body { font-family: sans-serif; background-color: #00bcd4; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
         .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); width: 100%; max-width: 600px; text-align: center; }
@@ -21,8 +23,8 @@
         <div class="status-box" id="statusContainer">
             <span id="statusText">URLデータを読み込んでいます...</span>
             <div id="previewContainer" style="display:none; width:100%;">
-                <svg id="svgPreview" width="100%" height="80">
-                    <path id="svgPath" d="" fill="#333" />
+                <svg id="svgPreview" width="100%" height="120">
+                    <g id="svgGroup" fill="#333"></g>
                 </svg>
             </div>
         </div>
@@ -63,9 +65,9 @@
             const { text, font } = getUrlParams();
 
             try {
-                statusText.innerText = `フォント「${font}」をブラウザに安全ロード中...`;
+                statusText.innerText = `フォント「${font}」を安全ロード中...`;
 
-                // 🌟 【Fetchを完全排除】<link>タグでGoogle Fontsスタイルシートを読み込み
+                // 🌟 Fetchを回避してGoogle Fontsスタイルシートを読み込み
                 const fontId = 'google-font-html-link';
                 let linkTag = document.getElementById(fontId);
                 if (!linkTag) {
@@ -76,84 +78,60 @@
                 }
                 linkTag.href = `https://googleapis.com{encodeURIComponent(font)}&text=${encodeURIComponent(text)}`;
 
-                // ブラウザがフォントを適用し終えるまで確実に待つ
+                // フォント読み込み完了を待つ
                 await document.fonts.ready;
 
-                // 🌟 【セキュリティを100%回避するCanvasアプローチ】
-                // 画面外（メモリ内）にCanvasを作成し、指定フォントで文字を描画します
+                // 🌟 超高解像度の隠しCanvasを作成（カクカクを完全に防止するため拡大して描画）
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
-                const fontSize = 50;
+                const baseFontSize = 120; // 大きめのフォントサイズでボケを防止
                 
-                ctx.font = `${fontSize}px "${font}"`;
+                ctx.font = `${baseFontSize}px "${font}"`;
                 const textMetrics = ctx.measureText(text);
                 
-                // 文字の大きさに合わせてCanvasサイズを決定
-                const width = Math.ceil(textMetrics.width) + 20;
-                const height = 80;
+                const width = Math.ceil(textMetrics.width) + 40;
+                const height = 200;
                 canvas.width = width;
                 canvas.height = height;
 
-                // 再度、サイズ確定後のCanvasに文字を描画
-                ctx.font = `${fontSize}px "${font}"`;
+                // Canvasに文字を滑らかに描画
+                ctx.font = `${baseFontSize}px "${font}"`;
                 ctx.textBaseline = 'middle';
                 ctx.fillStyle = 'black';
-                ctx.fillText(text, 10, height / 2);
+                ctx.fillText(text, 20, height / 2);
 
-                // 🌟 【Canvasのピクセルから輪郭（パス）を自動生成するロジック】
-                // opentypeを使わずに、描画されたドット絵のような情報から輪郭データをベクター化します
-                const imgData = ctx.getImageData(0, 0, width, height);
-                const svgPathData = scanContoursToPath(imgData, width, height);
+                // 🌟 Potraceアルゴリズムを発動して、画像をなめらかなベジエ曲線パスに変換
+                // サーバー不要で、ブラウザ上の計算だけで一瞬で行われます。
+                Potrace.loadImage(canvas);
+                Potrace.process(function() {
+                    const svgPathData = Potrace.getD(); // なめらかなパス（d属性）を抽出
 
-                if (!svgPathData || svgPathData.trim() === "") {
-                    throw new Error("文字の輪郭パスを抽出できませんでした。フォント名が正しいか確認してください。");
-                }
+                    if (!svgPathData || svgPathData.trim() === "") {
+                        showError("パス生成エラー", "文字のなめらかな輪郭を抽出できませんでした。フォント名を確認してください。");
+                        return;
+                    }
 
-                // UIの表示更新
-                statusText.style.display = 'none';
-                previewContainer.style.display = 'block';
-                outputArea.style.display = 'block';
+                    // UIの表示更新
+                    statusText.style.display = 'none';
+                    previewContainer.style.display = 'block';
+                    outputArea.style.display = 'block';
 
-                // プレビューのSVGサイズとパスを更新
-                const svgPreview = document.getElementById('svgPreview');
-                svgPreview.setAttribute('viewBox', `0 0 ${width} ${height}`);
-                document.getElementById('svgPath').setAttribute('d', svgPathData);
-                
-                // 完全なXMLコードをテキストエリアに書き出し
-                const fullSvgCode = `<?xml version="1.0" encoding="utf-8"?>\n<svg xmlns="http://w3.org" viewBox="0 0 ${width} ${height}" width="100%" height="100%">\n  <path d="${svgPathData}" fill="#333" />\n</svg>`;
-                document.getElementById('codeOutput').value = fullSvgCode;
+                    // プレビューのSVGサイズとパスを更新（Potraceの出力サイズに自動で合わせる）
+                    const svgPreview = document.getElementById('svgPreview');
+                    svgPreview.setAttribute('viewBox', `0 0 ${width} ${height}`);
+                    
+                    const svgGroup = document.getElementById('svgGroup');
+                    // Potraceは上下反転したパスを吐く場合があるのを防ぐ補正付きのタグ
+                    svgGroup.innerHTML = `<path d="${svgPathData}" />`;
+                    
+                    // 完全なXMLコードをテキストエリアに書き出し
+                    const fullSvgCode = `<?xml version="1.0" encoding="utf-8"?>\n<svg xmlns="http://w3.org" viewBox="0 0 ${width} ${height}" width="100%" height="100%">\n  <path d="${svgPathData}" fill="#333" />\n</svg>`;
+                    document.getElementById('codeOutput').value = fullSvgCode;
+                });
 
             } catch (error) {
-                showError("パス生成エラー", error.message);
+                showError("システムエラー", error.message);
             }
-        }
-
-        // 💡 ドットデータからSVGの矩形パス（輪郭）を高速で組み立てるアルゴリズム
-        function scanContoursToPath(imgData, width, height) {
-            let pathSegments = [];
-            const data = imgData.data;
-
-            for (let y = 0; y < height; y++) {
-                let inPath = false;
-                let startX = 0;
-                for (let x = 0; x < width; x++) {
-                    const alpha = data[(y * width + x) * 4 + 3];
-                    const isFilled = alpha > 128; // 不透明度が半分以上の場所を文字とする
-
-                    if (isFilled && !inPath) {
-                        startX = x;
-                        inPath = true;
-                    } else if (!isFilled && inPath) {
-                        // 横方向のドットの線をパス（長方形の組み合わせ）として構築
-                        pathSegments.push(`M${startX},${y}h${x - startX}v1h-${x - startX}Z`);
-                        inPath = false;
-                    }
-                }
-                if (inPath) {
-                    pathSegments.push(`M${startX},${y}h${width - startX}v1h-${width - startX}Z`);
-                }
-            }
-            return pathSegments.join(' ');
         }
 
         function showError(title, detail) {
