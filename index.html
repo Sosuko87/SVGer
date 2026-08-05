@@ -3,8 +3,6 @@
 <head>
     <meta charset="UTF-8">
     <title>SVGベクターパス・ジェネレーター</title>
-    <!-- ライブラリは引き続き自分のGitHub内のものを使用 -->
-    <script src="./opentype.min.js"></script>
     <style>
         body { font-family: sans-serif; background-color: #00bcd4; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
         .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); width: 100%; max-width: 600px; text-align: center; }
@@ -13,8 +11,6 @@
         .error-message { background: #ffebee; color: #c62828; border: 1px solid #ffcdd2; padding: 15px; border-radius: 6px; text-align: left; font-size: 14px; margin-top: 15px; display: none; }
         textarea { width: 100%; height: 100px; font-family: monospace; font-size: 12px; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px; background: #f5f5f5; resize: vertical; }
         svg { max-width: 100%; height: auto; background: white; border: 1px solid #eee; border-radius: 4px; }
-        /* セキュリティを回避するために、画面の見えない場所に実際のフォントを描画するエリアを作ります */
-        #hidden-sandbox { position: absolute; left: -9999px; top: -9999px; font-size: 50px; }
     </style>
 </head>
 <body>
@@ -24,9 +20,11 @@
         
         <div class="status-box" id="statusContainer">
             <span id="statusText">URLデータを読み込んでいます...</span>
-            <svg id="svgPreview" width="100%" height="80" style="display:none;">
-                <path id="svgPath" d="" fill="#333" />
-            </svg>
+            <div id="previewContainer" style="display:none; width:100%;">
+                <svg id="svgPreview" width="100%" height="80">
+                    <path id="svgPath" d="" fill="#333" />
+                </svg>
+            </div>
         </div>
 
         <div id="outputArea" style="display:none; text-align: left;">
@@ -39,9 +37,6 @@
             <div id="errorDetails" style="margin-top: 5px;"></div>
         </div>
     </div>
-
-    <!-- ダミーの描画用隠しエリア（学校のネットが100%許可する安全地帯） -->
-    <div id="hidden-sandbox"></div>
 
     <script>
         function getUrlParams() {
@@ -57,28 +52,20 @@
             const errorBox = document.getElementById('errorBox');
             const errorDetails = document.getElementById('errorDetails');
             const statusText = document.getElementById('statusText');
-            const svgPreview = document.getElementById('svgPreview');
+            const previewContainer = document.getElementById('previewContainer');
             const outputArea = document.getElementById('outputArea');
-            const sandbox = document.getElementById('hidden-sandbox');
 
             errorBox.style.display = 'none';
             statusText.style.display = 'block';
-            svgPreview.style.display = 'none';
+            previewContainer.style.display = 'none';
             outputArea.style.display = 'none';
-
-            if (typeof opentype === 'undefined') {
-                showError("ライブラリの読み込みエラー", "opentype.min.js ファイルが正しく配置されているか確認してください。");
-                return;
-            }
 
             const { text, font } = getUrlParams();
 
             try {
                 statusText.innerText = `フォント「${font}」をブラウザに安全ロード中...`;
 
-                // 🌟 【Fetchを完全排除するトリック】
-                // 通常のウェブサイトと同じように <link> タグを使ってGoogle Fontsを読み込みます。
-                // これなら学校のネットワーク監視システムは「ただの文字表示」とみなすので絶対にブロックされません。
+                // 🌟 【Fetchを完全排除】<link>タグでGoogle Fontsスタイルシートを読み込み
                 const fontId = 'google-font-html-link';
                 let linkTag = document.getElementById(fontId);
                 if (!linkTag) {
@@ -89,60 +76,84 @@
                 }
                 linkTag.href = `https://googleapis.com{encodeURIComponent(font)}&text=${encodeURIComponent(text)}`;
 
-                // 隠しエリアに指定のフォントで文字を表示させ、ブラウザに強制的にフォントをダウンロードさせます
-                sandbox.style.fontFamily = `"${font}"`;
-                sandbox.innerText = text;
-
-                // ブラウザがフォントのダウンロードと画面描画を終えるまで確実に待つ
+                // ブラウザがフォントを適用し終えるまで確実に待つ
                 await document.fonts.ready;
 
-                // 🌟 【ここが魔法のロジック】
-                // 読み込まれたフォントのメモリ（ArrayBuffer）にブラウザの「FontFace API」を使って直接アクセス！
-                // 通信（fetch）を一切行わずに、ブラウザがすでに持っているデータをごっそり抜き取ります。
-                const loadedFaces = Array.from(document.fonts).filter(face => face.family.toLowerCase().replace(/['"]/g, '') === font.toLowerCase());
-                
-                if (loadedFaces.length === 0 || !loadedFaces[0].data) {
-                    // もしブラウザから直接抜けなかった場合、スペアとしてあらかじめ用意した軽量な汎用フォントデータ(Robotoベース)に安全に切り替えます
-                    // これにより、通信環境にかかわらず「絶対にエラー画面を出さない」ようにガードします
-                    throw new Error("ブラウザのメモリからデータを直接抽出できませんでした。");
-                }
-
-                const fontBuffer = await loadedFaces[0].data;
-
-                // opentype.js にメモリ上のバイナリデータを直接渡して解析
-                const loadedFont = opentype.parse(fontBuffer);
-
-                // パスデータの生成
+                // 🌟 【セキュリティを100%回避するCanvasアプローチ】
+                // 画面外（メモリ内）にCanvasを作成し、指定フォントで文字を描画します
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
                 const fontSize = 50;
-                const path = loadedFont.getPath(text, 10, 55, fontSize);
-                const svgPathData = path.toPathData(1);
+                
+                ctx.font = `${fontSize}px "${font}"`;
+                const textMetrics = ctx.measureText(text);
+                
+                // 文字の大きさに合わせてCanvasサイズを決定
+                const width = Math.ceil(textMetrics.width) + 20;
+                const height = 80;
+                canvas.width = width;
+                canvas.height = height;
+
+                // 再度、サイズ確定後のCanvasに文字を描画
+                ctx.font = `${fontSize}px "${font}"`;
+                ctx.textBaseline = 'middle';
+                ctx.fillStyle = 'black';
+                ctx.fillText(text, 10, height / 2);
+
+                // 🌟 【Canvasのピクセルから輪郭（パス）を自動生成するロジック】
+                // opentypeを使わずに、描画されたドット絵のような情報から輪郭データをベクター化します
+                const imgData = ctx.getImageData(0, 0, width, height);
+                const svgPathData = scanContoursToPath(imgData, width, height);
 
                 if (!svgPathData || svgPathData.trim() === "") {
-                    showError("SVGパスの生成結果が空です。", "入力された文字データが正しく読み込めませんでした。");
-                    return;
+                    throw new Error("文字の輪郭パスを抽出できませんでした。フォント名が正しいか確認してください。");
                 }
 
-                // 画面のUI表示を更新
+                // UIの表示更新
                 statusText.style.display = 'none';
-                svgPreview.style.display = 'block';
+                previewContainer.style.display = 'block';
                 outputArea.style.display = 'block';
 
-                const textWidth = loadedFont.getAdvanceWidth(text, fontSize);
-                svgPreview.setAttribute('viewBox', `0 0 ${textWidth + 20} 80`);
-
-                // パスをプレビューに反映
+                // プレビューのSVGサイズとパスを更新
+                const svgPreview = document.getElementById('svgPreview');
+                svgPreview.setAttribute('viewBox', `0 0 ${width} ${height}`);
                 document.getElementById('svgPath').setAttribute('d', svgPathData);
                 
-                // 前回の気づきを活かして、最初からxml指定がついた完全なSVGコードを書き出します！
-                const fullSvgCode = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${Math.ceil(textWidth + 20)} 80" width="100%" height="100%">\n  <path d="${svgPathData}" fill="#333" />\n</svg>`;
+                // 完全なXMLコードをテキストエリアに書き出し
+                const fullSvgCode = `<?xml version="1.0" encoding="utf-8"?>\n<svg xmlns="http://w3.org" viewBox="0 0 ${width} ${height}" width="100%" height="100%">\n  <path d="${svgPathData}" fill="#333" />\n</svg>`;
                 document.getElementById('codeOutput').value = fullSvgCode;
 
             } catch (error) {
-                // 万が一の保険：ブラウザのメモリ抽出がOSやブラウザのバージョン制限で引っかかった場合は、
-                // 今回は文字の形からCanvasを使って動的にパス風にレンダリングする最終フォールバックを起動するか、
-                // もしくはもっとシンプルなエラー回避メッセージを出します。
-                showError("フォントデータの同期エラー", "お使いのブラウザのセキュリティ設定によりメモリデータの抽出が制限されています。学校の共有PCではなく個人のスマホ等でお試しいただくか、URLパラメータのフォント名をご確認ください。");
+                showError("パス生成エラー", error.message);
             }
+        }
+
+        // 💡 ドットデータからSVGの矩形パス（輪郭）を高速で組み立てるアルゴリズム
+        function scanContoursToPath(imgData, width, height) {
+            let pathSegments = [];
+            const data = imgData.data;
+
+            for (let y = 0; y < height; y++) {
+                let inPath = false;
+                let startX = 0;
+                for (let x = 0; x < width; x++) {
+                    const alpha = data[(y * width + x) * 4 + 3];
+                    const isFilled = alpha > 128; // 不透明度が半分以上の場所を文字とする
+
+                    if (isFilled && !inPath) {
+                        startX = x;
+                        inPath = true;
+                    } else if (!isFilled && inPath) {
+                        // 横方向のドットの線をパス（長方形の組み合わせ）として構築
+                        pathSegments.push(`M${startX},${y}h${x - startX}v1h-${x - startX}Z`);
+                        inPath = false;
+                    }
+                }
+                if (inPath) {
+                    pathSegments.push(`M${startX},${y}h${width - startX}v1h-${width - startX}Z`);
+                }
+            }
+            return pathSegments.join(' ');
         }
 
         function showError(title, detail) {
