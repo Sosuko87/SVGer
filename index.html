@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>100% Google Font SVG Path Generator</title>
+    <title>100% Google Font SVG Path Generator (Local Engine)</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; padding: 40px 20px; background: #00bcd4; color: white; }
         .card { background: white; color: #333; max-width: 650px; margin: 0 auto; padding: 30px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); }
@@ -16,8 +16,8 @@
         h2 { margin-top: 0; color: #222; font-size: 22px; }
         #msg { color: #555; font-size: 15px; }
     </style>
-    <!-- 💡 【修正】一番安定している大手配信元(jsdelivr)からopentype.jsを読み込みます -->
-    <script src="https://jsdelivr.net"></script>
+    <!-- 💡 【超重要】インターネットからではなく、あなたがダウンロードした同じフォルダのファイルを読み込みます -->
+    <script src="./opentype.min.js"></script>
 </head>
 <body>
 
@@ -39,11 +39,11 @@
             const preview = document.getElementById('preview');
             const btnContainer = document.getElementById('btnContainer');
 
-            // 💡 安全装置: もしライブラリの読み込み自体がブロックされていたらエラーを出す
+            // 💡 完全ローカルガード
             if (typeof opentype === 'undefined') {
                 loader.style.display = 'none';
-                msg.innerText = "❌ ライブラリが読み込めません";
-                errBox.innerText = "原因: opentype.js がインターネットからダウンロードできませんでした。\nネット接続を確認するか、ブラウザの拡張機能（広告ブロック等）がcdn.jsdelivr.netへのアクセスを遮断していないかご確認ください。";
+                msg.innerText = "❌ opentype.min.js が見つかりません";
+                errBox.innerText = "原因: HTMLファイルと同じフォルダに「opentype.min.js」が配置されていません。\n\n【対策】保存したHTMLと同じフォルダ（同じ階層）に、ダウンロードした opentype.min.js を置いてから、もう一度このページを開き直してください。";
                 errBox.style.display = 'block';
                 return;
             }
