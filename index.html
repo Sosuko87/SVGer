@@ -16,8 +16,8 @@
         h2 { margin-top: 0; color: #222; font-size: 22px; }
         #msg { color: #555; font-size: 15px; }
     </style>
-    <!-- opentype.jsライブラリ -->
-    <script src="https://cloudflare.com"></script>
+    <!-- 💡 【修正】一番安定している大手配信元(jsdelivr)からopentype.jsを読み込みます -->
+    <script src="https://jsdelivr.net"></script>
 </head>
 <body>
 
@@ -39,12 +39,19 @@
             const preview = document.getElementById('preview');
             const btnContainer = document.getElementById('btnContainer');
 
-            // 💡 複雑なハッシュ解析を廃止し、一番確実な標準のクエリ（?t=テキスト&f=フォント）に対応
+            // 💡 安全装置: もしライブラリの読み込み自体がブロックされていたらエラーを出す
+            if (typeof opentype === 'undefined') {
+                loader.style.display = 'none';
+                msg.innerText = "❌ ライブラリが読み込めません";
+                errBox.innerText = "原因: opentype.js がインターネットからダウンロードできませんでした。\nネット接続を確認するか、ブラウザの拡張機能（広告ブロック等）がcdn.jsdelivr.netへのアクセスを遮断していないかご確認ください。";
+                errBox.style.display = 'block';
+                return;
+            }
+
             const urlParams = new URLSearchParams(window.location.search || window.location.hash.substring(window.location.hash.indexOf('?')));
             let text = urlParams.get('t') || '';
             let fontName = urlParams.get('f') || '';
 
-            // もし何も指定されていなければ、テスト用に自動で「paypay / Roboto」をセット！
             if (!text) text = "paypay";
             if (!fontName) fontName = "Roboto";
 
@@ -55,29 +62,23 @@
             try {
                 msg.innerText = fontDisplayFamily + " を読み込み中...";
 
-                // 💡 【大解決】ブラウザに100%絶対に弾かれない、GoogleFonts公式の「WEB用オープンTTF配信サーバー」を直接叩きます
                 const cleanFontName = fontName.replace(/ /g, '+');
                 const safeFontUrl = "https://gstatic.com" + cleanFontName.toLowerCase() + "/v1/test.ttf";
-                
-                // ※一部の特殊なフォント名や可変フォントに対応するため、汎用的なGoogle公式アーカイブもバックアップとして用意
                 const fallbackUrl = "https://githubusercontent.com" + fontName.replace(/ /g, '').toLowerCase() + "/" + fontName.replace(/ /g, '') + "-Regular.ttf";
 
                 let font = null;
-                // まずは一番軽くて100%CORSフリーな公式配信URLから読み込み
                 try {
                     font = await opentype.load(safeFontUrl);
                 } catch(e) {
-                    // 失敗した場合はバックアップURLから読み込み
                     font = await opentype.load(fallbackUrl);
                 }
 
                 if (!font) {
-                    throw new Error("フォント「" + fontDisplayFamily + "」のダウンロードに失敗しました。フォント名が正しいかご確認ください。");
+                    throw new Error("フォント「" + fontDisplayFamily + "」のダウンロードに失敗しました。");
                 }
 
                 msg.innerText = "滑らかな純数式パスを計算中...";
 
-                // パスデータの生成
                 const fontSize = 72;
                 const glyphPath = font.getPath(text, 0, 0, fontSize);
                 const dData = glyphPath.toPathData(1);
@@ -86,7 +87,6 @@
                     throw new Error("フォントからパスを抽出できませんでした。");
                 }
 
-                // サイズの自動計算
                 const boundingBox = glyphPath.getBoundingBox();
                 const pad = 10;
                 const minX = boundingBox.x1 - pad;
@@ -94,8 +94,7 @@
                 const width = (boundingBox.x2 - boundingBox.x1) + (pad * 2);
                 const height = (boundingBox.y2 - boundingBox.y1) + (pad * 2);
 
-                // SVGの組み立て
-                const finalSvg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="' + minX + ' ' + minY + ' ' + width + ' ' + height + '" width="' + width + '" height="' + height + '"><path fill="rgb(255, 87, 34)" fill-rule="evenodd" d="' + dData + '" /></svg>';
+                const finalSvg = '<svg xmlns="http://w3.org" viewBox="' + minX + ' ' + minY + ' ' + width + ' ' + height + '" width="' + width + '" height="' + height + '"><path fill="rgb(255, 87, 34)" fill-rule="evenodd" d="' + dData + '" /></svg>';
 
                 preview.innerHTML = finalSvg;
                 
@@ -111,7 +110,7 @@
                 console.error(error);
                 loader.style.display = 'none';
                 msg.innerText = "❌ エラーが発生しました";
-                errBox.innerText = "原因: " + error.message + "\n\n【ヒント】何も入力せずに開くと自動で「paypay」が生成されます。";
+                errBox.innerText = "原因: " + error.message;
                 errBox.style.display = 'block';
             }
         }
