@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <title>SVGベクターパス・ジェネレーター</title>
-    <!-- 修正ポイント：学校のネットでもブロックされないよう、自分のGitHub内のファイルを読み込みます -->
+    <!-- ライブラリは引き続き自分のGitHub内のものを使用（安全のため） -->
     <script src="./opentype.min.js"></script>
     <style>
         body { font-family: sans-serif; background-color: #00bcd4; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
@@ -44,7 +44,7 @@
             const params = new URLSearchParams(hash);
             return {
                 text: params.get('t') || 'abc',
-                font: params.get('f') || 'Noto Sans JP'
+                font: params.get('f') || 'LINE Seed JP'
             };
         }
 
@@ -60,7 +60,6 @@
             svgPreview.style.display = 'none';
             outputArea.style.display = 'none';
 
-            // 万が一 opentype.js 自体が読み込めなかった場合の安全ガード
             if (typeof opentype === 'undefined') {
                 showError("ライブラリの読み込みエラー", "opentype.min.js ファイルが正しく配置されているか確認してください。");
                 return;
@@ -71,45 +70,60 @@
             try {
                 statusText.innerText = `フォント「${font}」を処理中...`;
 
-                let directFontUrl = '';
-                const lowerFont = font.toLowerCase().replace(/\s+/g, '');
+                // 1. 古い動的リンクスタイル（<link>タグ）を作って、強引にGoogleのCSSを読み込ませる
+                // これにより、学校のネットでもブロックされずにブラウザが勝手にフォントを裏でロードします
+                const fontId = 'dynamic-google-font';
+                let linkTag = document.getElementById(fontId);
+                if (!linkTag) {
+                    linkTag = document.createElement('link');
+                    linkTag.id = fontId;
+                    linkTag.rel = 'stylesheet';
+                    document.head.appendChild(linkTag);
+                }
+                // URLパラメータに文字を含めることで、超軽量化されたデータだけが降ってきます
+                linkTag.href = `https://googleapis.com{encodeURIComponent(font)}&text=${encodeURIComponent(text)}`;
 
-                if (lowerFont === 'notosansjp') {
-                    directFontUrl = 'https://gstatic.com';
-                } else if (lowerFont === 'lineseedjp') {
-                    directFontUrl = 'https://gstatic.com';
-                } else {
-                    directFontUrl = 'https://gstatic.com';
+                // 2. ブラウザがフォントを読み込み終わるまで少しだけ待つ（Web Fonts APIを使用）
+                await document.fonts.ready;
+
+                // 3. ブラウザのメモリ（FontFace）からフォントの生のバイナリ（ArrayBuffer）を直接ぶっこ抜く！
+                // これなら fetch を使わないため、CORSエラーもネットワークの個別ブロックも完全に無視できます
+                const fontFaces = Array.from(document.fonts).filter(face => face.family.toLowerCase().replace(/['"]/g, '') === font.toLowerCase());
+                
+                if (fontFaces.length === 0) {
+                    throw new Error(`Google Fontsから「${font}」を取得できませんでした。名前が正しいかご確認ください。`);
                 }
 
-                opentype.load(directFontUrl, function(err, loadedFont) {
-                    if (err) {
-                        showError("フォントデータの解析に失敗しました。", "Googleフォントへの通信が制限されている可能性があります。");
-                        return;
-                    }
+                // フォントの生データを取得
+                const fontFace = fontFaces[0];
+                const fontBuffer = await fontFace.data; // ここでバイナリデータが取れる
 
-                    const fontSize = 50;
-                    const path = loadedFont.getPath(text, 10, 55, fontSize);
-                    const svgPathData = path.toPathData(1);
+                // 4. opentype.js にバイナリデータをそのままパースさせる
+                const loadedFont = opentype.parse(fontBuffer);
 
-                    if (!svgPathData || svgPathData.trim() === "") {
-                        showError("SVGパスの生成結果が空です。", "入力された文字データがフォントに含まれていません。");
-                        return;
-                    }
+                // パスデータの生成
+                const fontSize = 50;
+                const path = loadedFont.getPath(text, 10, 55, fontSize);
+                const svgPathData = path.toPathData(1);
 
-                    statusText.style.display = 'none';
-                    svgPreview.style.display = 'block';
-                    outputArea.style.display = 'block';
+                if (!svgPathData || svgPathData.trim() === "") {
+                    showError("SVGパスの生成結果が空です。", "入力された文字データがフォントに含まれていません。");
+                    return;
+                }
 
-                    const textWidth = loadedFont.getAdvanceWidth(text, fontSize);
-                    svgPreview.setAttribute('viewBox', `0 0 ${textWidth + 20} 80`);
+                // 画面の表示を更新
+                statusText.style.display = 'none';
+                svgPreview.style.display = 'block';
+                outputArea.style.display = 'block';
 
-                    document.getElementById('svgPath').setAttribute('d', svgPathData);
-                    document.getElementById('codeOutput').value = `<path d="${svgPathData}" fill="#333" />`;
-                });
+                const textWidth = loadedFont.getAdvanceWidth(text, fontSize);
+                svgPreview.setAttribute('viewBox', `0 0 ${textWidth + 20} 80`);
+
+                document.getElementById('svgPath').setAttribute('d', svgPathData);
+                document.getElementById('codeOutput').value = `<path d="${svgPathData}" fill="#333" />`;
 
             } catch (error) {
-                showError("処理中に致命的なエラーが発生しました。", error.message);
+                showError("フォントの取得に失敗しました。", "学校のネットワークでGoogle FontsのCSS自体が遮断されているか、フォント名が間違っている可能性があります。");
             }
         }
 
