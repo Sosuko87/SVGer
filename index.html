@@ -3,10 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <title>SVGベクターパス・ジェネレーター</title>
-    <!-- エラー防止: fontkitとWebFont LoaderをCDNから読み込み -->
-    <script src="https://googleapis.com"></script>
-    <!-- opentype.jsをCDNから読み込み（ブラウザ上でのオンデマンド・サブセット化用） -->
-    <script src="opentype.min.js"></script>
+    <!-- opentype.jsのみをCDNから取得（これだけで完結させます） -->
+    <script src="https://jsdelivr.net"></script>
     <style>
         body { font-family: sans-serif; background-color: #00bcd4; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
         .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); width: 100%; max-width: 600px; text-align: center; }
@@ -41,17 +39,17 @@
     </div>
 
     <script>
-        // 1. URLのハッシュ（#t=abc&f=Font+Name）からパラメータを解析する関数
+        // 1. URLのハッシュ（#t=abc&f=Font+Name）からパラメータを解析
         function getUrlParams() {
             const hash = window.location.hash.substring(1);
             const params = new URLSearchParams(hash);
             return {
-                text: params.get('t') || '準備中...', // 文字列（デフォルト値）
-                font: params.get('f') || 'Noto Sans JP' // フォント名（デフォルト値）
+                text: params.get('t') || '準備中...',
+                font: params.get('f') || 'Noto Sans JP'
             };
         }
 
-        // 2. メインの処理を実行
+        // 2. メイン処理
         async function initGenerator() {
             const errorBox = document.getElementById('errorBox');
             const errorDetails = document.getElementById('errorDetails');
@@ -59,77 +57,78 @@
             const svgPreview = document.getElementById('svgPreview');
             const outputArea = document.getElementById('outputArea');
 
-            // パラメータの取得
+            // 画面を一旦初期化
+            errorBox.style.display = 'none';
+            statusText.style.display = 'block';
+            svgPreview.style.display = 'none';
+            outputArea.style.display = 'none';
+
             const { text, font } = getUrlParams();
 
             try {
-                statusText.innerText = `フォント「${font}」をGoogleから読み込み中...`;
+                statusText.innerText = `フォント「${font}」をGoogleから解析中...`;
 
-                // 3. WebFont Loaderを使って、指定されたGoogle Fontをブラウザに安全にロード
-                await new Promise((resolve, reject) => {
-                    WebFont.load({
-                        google: { families: [font] },
-                        active: () => resolve(),
-                        inactive: () => reject(new Error(`Google Fontsで「${font}」が見つからないか、読み込みに失敗しました。`))
-                    });
-                });
-
-                // 4. opentype.jsで解析するために、CORSエラーを回避しつつフォントファイルのバイナリURLを取得
-                // Google FontsのCSSをエミュレートしてフォントファイルの直接URLを特定します
+                // 3. Google FontsのCSS2 APIから、指定した文字（text）だけをターゲットに情報を取得
+                // これによりサーバー側で超軽量のサブセットフォントファイルが動的に作られます
                 const cssUrl = `https://googleapis.com{encodeURIComponent(font)}&text=${encodeURIComponent(text)}`;
                 const cssResponse = await fetch(cssUrl);
+                
+                if (!cssResponse.ok) {
+                    throw new Error(`Google Fonts APIの呼び出しに失敗しました。フォント名「${font}」が正しいかご確認ください。`);
+                }
+                
                 const cssText = await cssResponse.text();
                 
-                // CSSの中から src: url(...) の部分を取り出す
+                // CSSの中からフォントの生バイナリデータURL（src: url(...)）を正規表現で抽出
                 const fontUrlMatch = cssText.match(/url\((https:\/\/fonts\.gstatic\.com\/[^)]+)\)/);
                 if (!fontUrlMatch) {
-                    throw new Error("フォントファイルの解析アドレス（Gstatic）の取得に失敗しました。");
+                    throw new Error("指定された文字に対応するフォントデータの抽出に失敗しました。文字がフォントに含まれていない可能性があります。");
                 }
-                const directFontUrl = fontUrlMatch[1];
+                const directFontUrl = fontUrlMatch[1]; // マッチしたURL文字列を取得
 
-                // 5. 特定した直接URLから、opentype.jsでオンデマンド・サブセット化（必要な文字だけパス化）
+                // 4. 特定したフォントの直接URLをopentype.jsに流し込んでパス化
                 opentype.load(directFontUrl, function(err, loadedFont) {
                     if (err) {
-                        showError("フォントファイルの解析に失敗しました。", "ネットワーク環境またはGoogle Fontsの配信仕様が一時的に変更されている可能性があります。");
+                        showError("フォントファイルの解析に失敗しました。", "Googleの配信仕様変更、またはネットワーク制限の可能性があります。");
                         return;
                     }
 
-                    // パスデータの生成 (文字, X座標, Y座標, フォントサイズ)
+                    // パスデータの生成 (文字, 開始X座標, 開始Y座標, フォントサイズ)
                     const fontSize = 50;
                     const path = loadedFont.getPath(text, 10, 55, fontSize);
-                    const svgPathData = path.toPathData(1); // 小数点1桁に丸めて軽量化
+                    const svgPathData = path.toPathData(1); // 小数点1桁に丸めてコードを超軽量化
 
                     if (!svgPathData || svgPathData.trim() === "") {
-                        showError("SVGパスの生成に失敗しました。", "入力された文字に対応するグリフデータがありません。");
+                        showError("SVGパスの生成に失敗しました。", "入力された文字のグリフデータが空です。");
                         return;
                     }
 
-                    // 画面の表示を更新
+                    // 画面のUI表示を更新
                     statusText.style.display = 'none';
                     svgPreview.style.display = 'block';
                     outputArea.style.display = 'block';
 
-                    // SVGのビューボックスを文字の長さに合わせて自動調整
+                    // 文字の長さに合わせてSVGの横幅(viewBox)をジャストサイズに自動調整
                     const textWidth = loadedFont.getAdvanceWidth(text, fontSize);
                     svgPreview.setAttribute('viewBox', `0 0 ${textWidth + 20} 80`);
 
-                    // パスとテキストエリアに反映
+                    // パスとテキストエリアに書き出し
                     document.getElementById('svgPath').setAttribute('d', svgPathData);
                     document.getElementById('codeOutput').value = `<path d="${svgPathData}" fill="#333" />`;
                 });
 
             } catch (error) {
-                showError("フォントの読み込み中に通信エラーが発生しました。", error.message);
+                showError("処理中にエラーが発生しました。", error.message);
             }
         }
 
         function showError(title, detail) {
-            document.getElementById('statusText').innerText = "エラーのため停止しました。";
+            document.getElementById('statusText').innerText = "エラーが発生しました。";
             document.getElementById('errorBox').style.display = 'block';
-            document.getElementById('errorDetails').innerHTML = `${title}<br><span style="color:#666; font-size:12px;">${detail}</span>`;
+            document.getElementById('errorDetails').innerHTML = `<strong>${title}</strong><br><span style="color:#666; font-size:12px;">${detail}</span>`;
         }
 
-        // ページ読み込み時と、URLのハッシュ（#以降）が書き換わったときに実行
+        // ページ読み込み時と、URLのハッシュ（#以降）が変更されたら即座に実行
         window.addEventListener('load', initGenerator);
         window.addEventListener('hashchange', initGenerator);
     </script>
