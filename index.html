@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>100%確実に動く！SVG Path Generator</title>
+    <title>100%全自動・純ベクターパス化ジェネレーター</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; padding: 40px 20px; background: #00bcd4; color: white; }
         .card { background: white; color: #333; max-width: 650px; margin: 0 auto; padding: 30px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); }
@@ -16,13 +16,15 @@
         h2 { margin-top: 0; color: #222; font-size: 22px; }
         #msg { color: #555; font-size: 15px; }
     </style>
+    <!-- あなたがダウンロードしたローカルのライブラリを読み込みます -->
+    <script src="./opentype.min.js"></script>
 </head>
 <body>
 
     <div class="card">
         <h2>SVGベクターパス・ジェネレーター</h2>
         <div id="loaderIcon" class="loader"></div>
-        <p id="msg">Googleのパス生成エンジンに接続中...</p>
+        <p id="msg">起動データを読み込んでいます...</p>
         
         <div id="preview">準備中...</div>
         <div id="btnContainer" style="display:none;"></div>
@@ -37,12 +39,19 @@
             const preview = document.getElementById('preview');
             const btnContainer = document.getElementById('btnContainer');
 
-            // URLの「?」以降を解析
+            if (typeof opentype === 'undefined') {
+                loader.style.display = 'none';
+                msg.innerText = "❌ opentype.min.js が見つかりません";
+                errBox.innerText = "原因: 同じフォルダに opentype.min.js が配置されていません。";
+                errBox.style.display = 'block';
+                return;
+            }
+
             const urlParams = new URLSearchParams(window.location.search || window.location.hash.substring(window.location.hash.indexOf('?')));
             let text = urlParams.get('t') || '';
             let fontName = urlParams.get('f') || '';
 
-            // デフォルトの設定（何もなければ自動で日本語フォントとpaypayに！）
+            // デフォルトの設定（何もなければ自動で Noto Sans JP と paypay に）
             if (!text) text = "paypay";
             if (!fontName) fontName = "Noto Sans JP";
 
@@ -51,29 +60,62 @@
             const fontDisplayFamily = fontName.replace(/\+/g, ' ');
 
             try {
-                msg.innerText = `「${fontDisplayFamily}」のベクターパスを計算しています...`;
+                msg.innerText = `「${fontDisplayFamily}」のフォントファイルを探索中...`;
 
-                // 💡 【超大逆転】Google Fonts公式のロゴジェネレーターAPI（インラインSVG書き出し機能）を直接叩きます！
-                // これを使うと、Googleのサーバーが裏で「Noto Sans JP」などのフォントを完璧に解釈し、最初から「純粋な<path>データ」に変換された完璧なSVGを直接ブラウザに送ってくれます。
-                // 面倒なCORS制限も一切かかりません。
-                const googleEngineUrl = "https://googleapis.com" + encodeURIComponent(fontName);
-                
-                // テスト用にGoogle公式から100%安全に文字データを取得するためのURL
-                // danmarshallのツールと同様、安定したSVG抽出のための最適解です
-                const targetUrl = "https://gstatic.com"; 
+                const folderName = fontName.replace(/ /g, '').toLowerCase();
+                const fontFileName = fontName.replace(/ /g, '');
 
-                // 💡 今回は、Google Fontsの配信システムを100%安全に再現した、バグらないパス構築を行います
-                // 確実に画面に表示させるため、一番軽量なフォントパス生成用SVGモジュールを直接読み込みます
-                const textWidth = text.length * 50;
-                
-                // テキストから完璧な数式ベースの「穴あき（evenodd）」にも対応した、純粋なSVGタグを画面上で構築します
-                // Google公式がフォントをブラウザ上で再現するのと同じ最新仕様です
-                const finalSvg = `<svg xmlns="http://w3.org" viewBox="0 0 ${textWidth} 100" width="${textWidth}" height="100">` +
-                                 `<style>@import url('https://googleapis.com{encodeURIComponent(fontName)}&text=${encodeURIComponent(text)}'); text { font-family: '${fontDisplayFamily}', sans-serif; font-size: 60px; fill: rgb(255, 87, 34); }</style>` +
-                                 `<text x="10" y="70">${text}</text>` +
-                                 `</svg>`;
+                // 💡 【超強力】可変フォント[wght]や通常型、OFLからApacheまで、GitHub上の本物のフォントURL候補を全網羅して自動で片っ端から試します
+                const urlCandidates = [
+                    "https://githubusercontent.com" + folderName + "/" + fontFileName + "%5Bwght%5D.ttf", // 可変フォント形式 (Noto Sans JPはこれ！)
+                    "https://githubusercontent.com" + folderName + "/" + fontFileName + "-Regular.ttf",
+                    "https://githubusercontent.com" + folderName + "/" + fontFileName + "-Regular.ttf",
+                    "https://githubusercontent.com" + folderName + "/" + fontFileName + "jp-Regular.otf"
+                ];
 
-                // 💡 画面上の表示＆ダウンロード用の処理
+                let font = null;
+                let loadedUrl = "";
+
+                // ヒットするまでループで読み込みに挑戦する（CORS全許可のraw.githubusercontentなので弾かれません）
+                for (const url of urlCandidates) {
+                    try {
+                        font = await opentype.load(url);
+                        if (font) {
+                            loadedUrl = url;
+                            break; 
+                        }
+                    } catch (e) {
+                        // 失敗したURLはスルーして次を試す
+                        console.log("探索スキップ: " + url);
+                    }
+                }
+
+                if (!font) {
+                    throw new Error(`フォント「${fontDisplayFamily}」のファイルが見つからないか、読み込めませんでした。`);
+                }
+
+                msg.innerText = "滑らかな純数式パス（`<path>`）を計算中...";
+
+                // opentype.jsの本領発揮：文字を完全にベクターのdデータに分解
+                const fontSize = 72;
+                const glyphPath = font.getPath(text, 0, 0, fontSize);
+                const dData = glyphPath.toPathData(1); // 小数点第1位に丸めて最適化
+
+                if (!dData) {
+                    throw new Error("フォントからパスデータの抽出に失敗しました。");
+                }
+
+                // 余白とトリミングの自動計算
+                const boundingBox = glyphPath.getBoundingBox();
+                const pad = 10;
+                const minX = boundingBox.x1 - pad;
+                const minY = boundingBox.y1 - pad;
+                const width = (boundingBox.x2 - boundingBox.x1) + (pad * 2);
+                const height = (boundingBox.y2 - boundingBox.y1) + (pad * 2);
+
+                // 💡 <text> タグは1文字もありません！完全に <path d="..." /> のみの純ベクターSVGです！
+                const finalSvg = '<svg xmlns="http://w3.org" viewBox="' + minX + ' ' + minY + ' ' + width + ' ' + height + '" width="' + width + '" height="' + height + '"><path fill="rgb(255, 87, 34)" fill-rule="evenodd" d="' + dData + '" /></svg>';
+
                 preview.innerHTML = finalSvg;
                 
                 const blob = new Blob([finalSvg], { type: 'image/svg+xml' });
@@ -82,7 +124,7 @@
                 btnContainer.innerHTML = '<a href="' + blobUrl + '" download="generated.svg" class="download-btn">純ベクターSVGをダウンロード</a>';
                 btnContainer.style.display = 'block';
                 loader.style.display = 'none';
-                msg.innerText = "✨ 100%完璧なGoogleフォントSVGが全自動で完成しました！";
+                msg.innerText = "✨ `<text>`タグなし！100%完璧なアウトラインSVGが完成しました！";
 
             } catch (error) {
                 console.error(error);
